@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+
+# Testing & Cache
+.coverage
+.cache/
+*.log
+
+# Build Outputs
+dist/
+dist-ssr/
+build/
+*.tsbuildinfo
+
+# Environment & Secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Project Generated Workspace & Renders
+/workspace/
+/python/models/*
+!/python/models/.gitkeep
+/scripts/models/*
+!/scripts/models/.gitkeep
+
+# Temporary test media files
+test_*.mp4
+test_*.wav
+test_*.json
+test_*.srt
+*.log
+
+# IDE & OS files
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db

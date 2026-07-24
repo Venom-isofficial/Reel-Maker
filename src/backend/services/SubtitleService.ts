@@ -1,0 +1,139 @@
+import fs from 'fs';
+import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+import { CaptionData, CaptionWord, ServiceResult } from '../types';
+
+const execAsync = promisify(exec);
+
+export class SubtitleService {
+  private apiKey: string;
+
+  constructor(apiKey?: string) {
+    this.apiKey = apiKey || process.env.WHISPER_API_KEY || process.env.OPENAI_API_KEY || '';
+  }
+
+  public setApiKey(key: string) {
+    this.apiKey = key;
+  }
+
+  private formatSrtTime(seconds: number): string {
+    const pad = (num: number, size: number) => String(num).padStart(size, '0');
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    const millis = Math.floor((seconds % 1) * 1000);
+    return `${pad(hrs, 2)}:${pad(mins, 2)}:${pad(secs, 2)},${pad(millis, 3)}`;
+  }
+
+  public writeSrtFile(words: CaptionWord[], srtFilePath: string) {
+    const phrases: { text: string; start: number; end: number }[] = [];
+    let currentPhrase: string[] = [];
+    let phraseStart = 0;
+    let phraseEnd = 0;
+
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      if (currentPhrase.length === 0) phraseStart = w.start;
+      currentPhrase.push(w.word);
+      phraseEnd = w.end;
+
+      const isSentenceEnd = /[.?!]/.test(w.word);
+      const isClauseEnd = /[:;]/.test(w.word) && currentPhrase.length >= 6;
+      const isMaxWords = currentPhrase.length >= 11;
+      const isLast = i === words.length - 1;
+
+      if (isSentenceEnd || isClauseEnd || isMaxWords || isLast) {
+        phrases.push({
+          text: currentPhrase.join(' ').toUpperCase(),
+          start: phraseStart,
+          end: phraseEnd
+        });
+        currentPhrase = [];
+      }
+    }
+
+    const srtLines = phrases.map((p, idx) => {
+      return `${idx + 1}\n${this.formatSrtTime(p.start)} --> ${this.formatSrtTime(p.end)}\n${p.text}\n`;
+    });
+
+    fs.writeFileSync(srtFilePath, srtLines.join('\n'), 'utf-8');
+  }
+
+  public async generateCaptions(
+    audioFilePath: string,
+    scriptText: string,
+    outputCaptionsPath: string
+  ): Promise<ServiceResult<CaptionData>> {
+    try {
+      let finalWords: CaptionWord[] = [];
+      let fullText = scriptText;
+
+      const srtPath = path.join(path.dirname(outputCaptionsPath), 'captions.srt');
+
+      // 1. Local Faster-Whisper Transcription Engine (python/subtitle/transcribe.py)
+      if (fs.existsSync(audioFilePath)) {
+        try {
+          const scriptPath = path.resolve(process.cwd(), 'python/subtitle/transcribe.py');
+          if (fs.existsSync(scriptPath)) {
+            console.log('Running local Faster-Whisper (large-v3) transcription...');
+            const cmd = `python "${scriptPath.replace(/\\/g, '/')}" --input "${audioFilePath.replace(/\\/g, '/')}" --json "${outputCaptionsPath.replace(/\\/g, '/')}" --srt "${srtPath.replace(/\\/g, '/')}"`;
+            
+            await execAsync(cmd, { 
+              timeout: 180000,
+              env: { ...process.env, PYTHONUNBUFFERED: '1' }
+            });
+
+            if (fs.existsSync(outputCaptionsPath)) {
+              const data = JSON.parse(fs.readFileSync(outputCaptionsPath, 'utf-8'));
+              if (data?.words && Array.isArray(data.words) && data.words.length > 0) {
+                finalWords = data.words;
+                console.log(`✅ Local Faster-Whisper (large-v3) Transcribed ${finalWords.length} words successfully!`);
+              }
+            }
+          }
+        } catch (fwErr: any) {
+          console.warn("Local Faster-Whisper transcription warning, falling back to script alignment:", fwErr.message);
+        }
+      }
+
+      // 2. Script Text Alignment Engine (Fallback)
+      if (finalWords.length === 0) {
+        console.log('Generating captions via script text timing alignment fallback...');
+        const wordsList = scriptText.replace(/[^\w\s'$%-]/gi, '').split(/\s+/).filter(Boolean);
+        let currentTime = 0.2;
+
+        for (let i = 0; i < wordsList.length; i++) {
+          const word = wordsList[i];
+          const duration = Math.max(0.25, Math.min(0.7, word.length * 0.075));
+          const start = parseFloat(currentTime.toFixed(2));
+          const end = parseFloat((currentTime + duration).toFixed(2));
+          
+          finalWords.push({ word, start, end });
+          currentTime = parseFloat((end + 0.08).toFixed(2));
+        }
+
+        const captionData: CaptionData = { fullText, words: finalWords };
+        fs.writeFileSync(outputCaptionsPath, JSON.stringify(captionData, null, 2), 'utf-8');
+        this.writeSrtFile(finalWords, srtPath);
+      }
+
+      const captionData: CaptionData = {
+        fullText,
+        words: finalWords,
+      };
+
+      return {
+        success: true,
+        retryable: false,
+        data: captionData,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        retryable: true,
+        errorMessage: `Subtitle generation failed: ${err.message}`,
+      };
+    }
+  }
+}
