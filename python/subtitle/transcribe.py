@@ -90,12 +90,12 @@ def main():
     model = None
     caption_words = None
 
-    target_device = os.environ.get("WHISPER_DEVICE", "cpu")
-    target_compute = os.environ.get("WHISPER_COMPUTE_TYPE", "int8")
+    target_device = os.environ.get("WHISPER_DEVICE", "cuda")
+    target_compute = os.environ.get("WHISPER_COMPUTE_TYPE", "float16")
 
     if target_device == "cuda":
         try:
-            print("Attempting Faster-Whisper(large-v3, device='cuda', compute_type='float16')...")
+            print("Attempting Faster-Whisper (large-v3, device='cuda', compute_type='float16')...")
             model = WhisperModel("large-v3", device="cuda", compute_type="float16")
             caption_words = run_transcription(audio_path, model)
         except Exception as cuda_err:
@@ -103,13 +103,13 @@ def main():
             model = None
 
     if model is None or caption_words is None:
-        print(f"Initializing device='{target_device}', compute_type='{target_compute}'...")
+        print("Fallback: Initializing Faster-Whisper (large-v3, device='cpu', compute_type='int8')...")
         try:
-            model = WhisperModel("large-v3", device=target_device, compute_type=target_compute)
-            print(f"WhisperModel initialized successfully on {target_device} ({target_compute})")
+            model = WhisperModel("large-v3", device="cpu", compute_type="int8")
+            print("WhisperModel initialized successfully on CPU (int8)")
             caption_words = run_transcription(audio_path, model)
         except Exception as cpu_err:
-            print(f"Error executing Faster-Whisper model: {cpu_err}")
+            print(f"Error executing Faster-Whisper model on CPU: {cpu_err}")
             sys.exit(1)
 
     duration_sec = round(time.time() - start_time, 2)

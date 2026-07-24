@@ -34,11 +34,22 @@ export class RemotionService {
       fs.writeFileSync(concatListPath, clipFiles.join('\n'), 'utf-8');
 
       console.log(`Stitching ${clipFiles.length} scene clips with FFmpeg into stitched_video.mp4...`);
-      const cmd = `ffmpeg -y -f concat -safe 0 -i "${concatListPath.replace(/\\/g, '/')}" -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -an "${stitchedPath.replace(/\\/g, '/')}"`;
+      try {
+        const nvencCmd = `ffmpeg -y -f concat -safe 0 -i "${concatListPath.replace(/\\/g, '/')}" -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,tpad=stop_mode=clone:stop_duration=4" -c:v h264_nvenc -preset p4 -pix_fmt yuv420p -an "${stitchedPath.replace(/\\/g, '/')}"`;
+        await execAsync(nvencCmd, { timeout: 45000 });
+        if (fs.existsSync(stitchedPath) && fs.statSync(stitchedPath).size > 100000) {
+          console.log(`✅ NVIDIA NVENC FFmpeg Video Stitching Complete with Frame Padding: (${fs.statSync(stitchedPath).size} bytes)`);
+          return stitchedPath;
+        }
+      } catch (nvencErr: any) {
+        console.warn('NVENC FFmpeg scene stitching fallback to libx264:', nvencErr.message);
+      }
+
+      const cmd = `ffmpeg -y -f concat -safe 0 -i "${concatListPath.replace(/\\/g, '/')}" -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,tpad=stop_mode=clone:stop_duration=4" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -an "${stitchedPath.replace(/\\/g, '/')}"`;
       await execAsync(cmd, { timeout: 45000 });
 
       if (fs.existsSync(stitchedPath) && fs.statSync(stitchedPath).size > 100000) {
-        console.log(`✅ FFmpeg Video Stitching Complete: (${fs.statSync(stitchedPath).size} bytes)`);
+        console.log(`✅ FFmpeg Video Stitching Complete with Frame Padding: (${fs.statSync(stitchedPath).size} bytes)`);
         return stitchedPath;
       }
     } catch (err: any) {
@@ -79,18 +90,20 @@ export class RemotionService {
   }
 
   public async renderVideo(runDir: string): Promise<ServiceResult<string>> {
-    const renderDir = path.join(runDir, 'render');
-    const finalMp4Path = path.join(renderDir, 'final.mp4');
+    const finalMp4Path = path.join(runDir, 'render/final.mp4');
+    const renderDir = path.dirname(finalMp4Path);
 
     try {
       if (!fs.existsSync(renderDir)) {
         fs.mkdirSync(renderDir, { recursive: true });
       }
 
+      const articlePath = path.join(runDir, 'article.json');
       const masterPath = path.join(runDir, 'master.json');
       const voicePath = path.join(runDir, 'voice.mp3');
       const captionsPath = path.join(runDir, 'captions.json');
       const srtPath = path.join(runDir, 'captions.srt');
+      const metadataPath = path.join(runDir, 'metadata.json');
 
       if (!fs.existsSync(masterPath) || !fs.existsSync(voicePath)) {
         return {
@@ -100,14 +113,21 @@ export class RemotionService {
         };
       }
 
+      let articleData: any = {};
       let masterData: any = {};
       let captionData: any = {};
+      let metadataData: any = {};
+      if (fs.existsSync(articlePath)) articleData = JSON.parse(fs.readFileSync(articlePath, 'utf-8'));
       if (fs.existsSync(masterPath)) masterData = JSON.parse(fs.readFileSync(masterPath, 'utf-8'));
       if (fs.existsSync(captionsPath)) captionData = JSON.parse(fs.readFileSync(captionsPath, 'utf-8'));
+      if (fs.existsSync(metadataPath)) metadataData = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
+
+      const newsHeadline = articleData.headline || metadataData.title || masterData.title || 'Market Update';
+      const watermarkText = `Nexus - ${newsHeadline}`;
 
       const sceneCount = (masterData.scenes || []).length || 6;
       
-      // 1. Stitch scene clips with FFmpeg into stitched_video.mp4
+      // 1. Stitch scene clips with FFmpeg into stitched_video.mp4 using NVENC GPU acceleration
       const stitchedLocalPath = await this.stitchClipsWithFFmpeg(runDir, sceneCount);
 
       // Start temporary local HTTP server on a random free port for Remotion Chromium
@@ -124,15 +144,15 @@ export class RemotionService {
           words: captionData.words || [],
           audioPath: `${baseUrl}/voice.mp3`,
           stitchedVideoPath: stitchedLocalPath ? `${baseUrl}/clips/stitched_video.mp4` : undefined,
-          watermarkText: 'AI REEL FACTORY',
+          watermarkText,
         };
 
         const propsJsonPath = path.join(runDir, 'remotion_props.json');
         fs.writeFileSync(propsJsonPath, JSON.stringify(propsObj, null, 2), 'utf-8');
 
-        // 2. Remotion CLI Render (180s timeout so animated subtitles overlay completely renders)
+        // 2. Remotion CLI Render with NVIDIA GPU acceleration flags
         const rootPath = path.resolve(process.cwd(), 'src/remotion/Root.tsx');
-        const cmd = `npx remotion render "${rootPath.replace(/\\/g, '/')}" ReelComposition "${finalMp4Path.replace(/\\/g, '/')}" --props="${propsJsonPath.replace(/\\/g, '/')}" --concurrency=2`;
+        const cmd = `npx remotion render "${rootPath.replace(/\\/g, '/')}" ReelComposition "${finalMp4Path.replace(/\\/g, '/')}" --props="${propsJsonPath.replace(/\\/g, '/')}" --gl=angle --enable-gpu --concurrency=2`;
         
         console.log(`Executing Remotion CLI render with Subtitles Overlay: ${cmd}`);
         await execAsync(cmd, { timeout: 180000 });

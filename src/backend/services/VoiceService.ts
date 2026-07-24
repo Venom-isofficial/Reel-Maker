@@ -24,6 +24,18 @@ export class VoiceService {
     }
   }
 
+  private async getExactAudioDuration(filePath: string): Promise<number> {
+    try {
+      const cmd = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath.replace(/\\/g, '/')}"`;
+      const { stdout } = await execAsync(cmd, { timeout: 10000 });
+      const parsed = parseFloat(stdout.trim());
+      if (!isNaN(parsed) && parsed > 0) {
+        return Math.ceil(parsed);
+      }
+    } catch (e) {}
+    return 0;
+  }
+
   public async generateVoice(
     scriptText: string,
     outputMp3Path: string,
@@ -46,8 +58,9 @@ export class VoiceService {
           await execAsync(cmd, { timeout: 60000 });
 
           if (fs.existsSync(outputMp3Path) && fs.statSync(outputMp3Path).size > 1000) {
-            const duration = Math.max(15, Math.ceil(scriptText.split(' ').length / 2.8));
-            console.log(`✅ Real Kokoro Voice MP3 created successfully (${fs.statSync(outputMp3Path).size} bytes)`);
+            const exactDur = await this.getExactAudioDuration(outputMp3Path);
+            const duration = exactDur || Math.max(15, Math.ceil(scriptText.split(' ').length / 2.8));
+            console.log(`✅ Real Kokoro Voice MP3 created successfully (${fs.statSync(outputMp3Path).size} bytes, exact audio duration: ${duration}s)`);
             return {
               success: true,
               retryable: false,
@@ -85,8 +98,9 @@ export class VoiceService {
         if (audioBuffers.length > 0) {
           const concatenatedAudio = Buffer.concat(audioBuffers);
           fs.writeFileSync(outputMp3Path, concatenatedAudio);
-          const duration = Math.max(15, Math.ceil(scriptText.split(' ').length / 2.8));
-          console.log(`✅ Google Synth Voice MP3 created successfully (${fs.statSync(outputMp3Path).size} bytes)`);
+          const exactDur = await this.getExactAudioDuration(outputMp3Path);
+          const duration = exactDur || Math.max(15, Math.ceil(scriptText.split(' ').length / 2.8));
+          console.log(`✅ Google Synth Voice MP3 created successfully (${fs.statSync(outputMp3Path).size} bytes, exact audio duration: ${duration}s)`);
           return {
             success: true,
             retryable: false,

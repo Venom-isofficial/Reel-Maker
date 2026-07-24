@@ -154,6 +154,26 @@ export class PipelineOrchestrator {
     const duration = voiceRes.data?.duration || 20;
     this.logger.info(`Voice generated: ${voiceSize} bytes, ~${duration}s`);
 
+    // Recalibrate master.json scene durations to match exact audio narration length + 2s buffer padding
+    const masterPath = this.storageService.getFilePath(runDir, 'master.json');
+    if (fs.existsSync(masterPath)) {
+      try {
+        const masterData = JSON.parse(fs.readFileSync(masterPath, 'utf-8'));
+        if (masterData && Array.isArray(masterData.scenes) && masterData.scenes.length > 0) {
+          const plannedSum = masterData.scenes.reduce((acc: number, s: any) => acc + (s.durationSeconds || 5), 0);
+          const targetVideoDur = Math.ceil(duration + 2.0);
+          if (plannedSum < targetVideoDur) {
+            const extraSec = targetVideoDur - plannedSum;
+            const lastIdx = masterData.scenes.length - 1;
+            masterData.scenes[lastIdx].durationSeconds = (masterData.scenes[lastIdx].durationSeconds || 5) + extraSec;
+            masterData.totalDuration = targetVideoDur;
+            this.storageService.saveJson(runDir, 'master.json', masterData);
+            this.logger.info(`Recalibrated final scene duration (+${extraSec}s padding) to match voice narration (${targetVideoDur}s total)`);
+          }
+        }
+      } catch (e) {}
+    }
+
     if (this.wizardState) {
       this.wizardState.currentStep = 3;
       this.wizardState.voicePath = voiceMp3Path;

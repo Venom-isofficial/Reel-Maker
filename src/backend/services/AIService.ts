@@ -121,9 +121,9 @@ export class AIService {
       const keywordsStr = (analysis.keywords && analysis.keywords.length > 0) ? analysis.keywords.join(', ') : 'market shifts';
 
       const introduction = `${entity} and key analysts are closely tracking these swift shifts in ${topic.toLowerCase()}.`;
-      const body = `As key changes take effect around ${keywordsStr}, investors are evaluating the long-term market implications.`;
-      const ending = `How do you think this development will impact ${topic.toLowerCase()}?`;
-      const cta = "Comment your opinion below!";
+      const body = `As key changes take effect around ${keywordsStr}, investors are closely watching the financial domino effect.`;
+      const ending = `With billions of dollars hanging in the balance, market sentiment is rapidly shifting.`;
+      const cta = `Will this move trigger the next major market rally, or are investors heading straight into a massive trap? Drop your take below!`;
       const fullScript = `${directHook} ${introduction} ${body} ${ending} ${cta}`;
 
       const dynamicScript: ScriptOutput = {

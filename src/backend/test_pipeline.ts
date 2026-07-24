@@ -101,8 +101,23 @@ async function runStepByStepVerification() {
     process.exit(1);
   }
   const voiceSize = fs.statSync(voiceMp3Path).size;
-  logger.info(`Step 6: Voice Narration MP3 Generated -> ${voiceMp3Path} (${voiceSize} bytes)`);
-  console.log('✅ Step 6 Passed: Saved voice.mp3');
+  const actualVoiceDur = voiceRes.data?.duration || 20;
+  logger.info(`Step 6: Voice Narration MP3 Generated -> ${voiceMp3Path} (${voiceSize} bytes, duration: ${actualVoiceDur}s)`);
+  console.log(`✅ Step 6 Passed: Saved voice.mp3 (exact duration: ${actualVoiceDur}s)`);
+
+  // Recalibrate master.json scene durations to match exact audio narration length + 2s padding
+  if (masterRes.data && masterRes.data.scenes && masterRes.data.scenes.length > 0) {
+    const plannedSum = masterRes.data.scenes.reduce((acc: number, s: any) => acc + (s.durationSeconds || 5), 0);
+    const targetVideoDur = Math.ceil(actualVoiceDur + 2.0);
+    if (plannedSum < targetVideoDur) {
+      const extraSec = targetVideoDur - plannedSum;
+      const lastIdx = masterRes.data.scenes.length - 1;
+      masterRes.data.scenes[lastIdx].durationSeconds = (masterRes.data.scenes[lastIdx].durationSeconds || 5) + extraSec;
+      masterRes.data.totalDuration = targetVideoDur;
+      storage.saveJson(runDir, 'master.json', masterRes.data);
+      logger.info(`Recalibrated final scene duration (+${extraSec}s padding) to match voice narration (${targetVideoDur}s total)`);
+    }
+  }
 
   // STEP 7: Captions (Whisper)
   console.log('\n--- [STEP 7/11] CAPTIONS GENERATION ---');

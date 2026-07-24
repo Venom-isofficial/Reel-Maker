@@ -42,10 +42,10 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
   };
 
   const VOICE_OPTIONS = [
-    { value: 'am_michael', label: '🎙️ Michael (Male News Anchor)' },
+    { value: 'am_michael', label: '🎙️ Michael (Male News Anchor - Default)' },
     { value: 'af_bella', label: '🎙️ Bella (Female Professional)' },
-    { value: 'af_sarah', label: '🎙️ Sarah (Female Warm)' },
     { value: 'am_adam', label: '🎙️ Adam (Male Deep)' },
+    { value: 'bm_george', label: '🎙️ George (British Male)' },
   ];
 
   return (

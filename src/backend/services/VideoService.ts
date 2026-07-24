@@ -28,6 +28,17 @@ export class VideoService {
   ): Promise<boolean> {
     try {
       const targetDuration = Math.max(3, durationSeconds || 5);
+      // Try NVIDIA NVENC hardware acceleration first
+      try {
+        const nvencCmd = `ffmpeg -y -ss 0 -i "${rawVideoPath.replace(/\\/g, '/')}" -t ${targetDuration} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30" -c:v h264_nvenc -preset p4 -pix_fmt yuv420p -an "${outputPath.replace(/\\/g, '/')}"`;
+        await execAsync(nvencCmd, { timeout: 30000 });
+        if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 50000) {
+          return true;
+        }
+      } catch (nvencErr: any) {
+        console.warn('NVENC GPU acceleration fallback to libx264:', nvencErr.message);
+      }
+
       const cmd = `ffmpeg -y -ss 0 -i "${rawVideoPath.replace(/\\/g, '/')}" -t ${targetDuration} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -an "${outputPath.replace(/\\/g, '/')}"`;
       await execAsync(cmd, { timeout: 30000 });
       return fs.existsSync(outputPath) && fs.statSync(outputPath).size > 50000;
@@ -49,6 +60,12 @@ export class VideoService {
       const targetDuration = Math.max(3, durationSeconds || 5);
       const colors = ['0x0f172a', '0x1e1b4b', '0x311042', '0x064e3b', '0x451a03', '0x1e293b'];
       const bgHex = colors[(sceneNumber - 1) % colors.length];
+
+      try {
+        const nvencCmd = `ffmpeg -y -f lavfi -i "color=c=${bgHex}:s=1080x1920:r=30" -t ${targetDuration} -c:v h264_nvenc -preset p4 -pix_fmt yuv420p "${outputPath.replace(/\\/g, '/')}"`;
+        await execAsync(nvencCmd, { timeout: 20000 });
+        if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 5000) return true;
+      } catch (e) {}
 
       const cmd = `ffmpeg -y -f lavfi -i "color=c=${bgHex}:s=1080x1920:r=30" -t ${targetDuration} -c:v libx264 -preset ultrafast -pix_fmt yuv420p "${outputPath.replace(/\\/g, '/')}"`;
       await execAsync(cmd, { timeout: 20000 });

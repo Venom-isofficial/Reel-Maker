@@ -60,6 +60,16 @@ export class SubtitleService {
     fs.writeFileSync(srtFilePath, srtLines.join('\n'), 'utf-8');
   }
 
+  private async getAudioDuration(filePath: string): Promise<number> {
+    try {
+      const cmd = `ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${filePath.replace(/\\/g, '/')}"`;
+      const { stdout } = await execAsync(cmd, { timeout: 10000 });
+      const parsed = parseFloat(stdout.trim());
+      if (!isNaN(parsed) && parsed > 0) return parsed;
+    } catch (e) {}
+    return 0;
+  }
+
   public async generateCaptions(
     audioFilePath: string,
     scriptText: string,
@@ -101,16 +111,24 @@ export class SubtitleService {
       if (finalWords.length === 0) {
         console.log('Generating captions via script text timing alignment fallback...');
         const wordsList = scriptText.replace(/[^\w\s'$%-]/gi, '').split(/\s+/).filter(Boolean);
+        const audioDur = (await this.getAudioDuration(audioFilePath)) || 30;
+        
+        // Calculate raw duration sum based on word lengths
+        const rawDurations = wordsList.map((w) => Math.max(0.25, Math.min(0.7, w.length * 0.075)));
+        const rawSum = rawDurations.reduce((a, b) => a + b, 0) + (wordsList.length * 0.08);
+        
+        // Proportional time scaling factor to stretch/compress words across full audio duration
+        const scaleFactor = (audioDur - 0.5) / Math.max(1, rawSum);
         let currentTime = 0.2;
 
         for (let i = 0; i < wordsList.length; i++) {
           const word = wordsList[i];
-          const duration = Math.max(0.25, Math.min(0.7, word.length * 0.075));
+          const duration = Math.max(0.2, rawDurations[i] * scaleFactor);
           const start = parseFloat(currentTime.toFixed(2));
           const end = parseFloat((currentTime + duration).toFixed(2));
           
           finalWords.push({ word, start, end });
-          currentTime = parseFloat((end + 0.08).toFixed(2));
+          currentTime = parseFloat((end + (0.08 * scaleFactor)).toFixed(2));
         }
 
         const captionData: CaptionData = { fullText, words: finalWords };

@@ -117,10 +117,10 @@ export const SettingsPage: React.FC = () => {
                   onChange={(e) => { handleChange('kokoroVoice', e.target.value); handleChange('voice', e.target.value); }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-500"
                 >
-                  <option value="am_michael">🎙️ Michael (Male News Anchor)</option>
+                  <option value="am_michael">🎙️ Michael (Male News Anchor - Default)</option>
                   <option value="af_bella">🎙️ Bella (Female Professional)</option>
-                  <option value="af_sarah">🎙️ Sarah (Female Warm)</option>
                   <option value="am_adam">🎙️ Adam (Male Deep)</option>
+                  <option value="bm_george">🎙️ George (British Male)</option>
                 </select>
               </div>
               <div>
