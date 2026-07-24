@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Film, Loader2, ArrowLeft } from 'lucide-react';
 
 interface Props {
@@ -11,9 +11,13 @@ export const WizardStep5_Render: React.FC<Props> = ({ runId, onComplete, onBack 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
+  const hasFiredRef = useRef(false);
 
   useEffect(() => {
-    startRender();
+    if (!hasFiredRef.current) {
+      hasFiredRef.current = true;
+      startRender();
+    }
   }, []);
 
   // Simulate progress since the actual render doesn't stream progress

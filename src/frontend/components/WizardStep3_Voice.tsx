@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ScriptOutput } from '../../backend/types';
 import { Mic, Loader2, ArrowRight, ArrowLeft, RefreshCw, Edit3 } from 'lucide-react';
 
@@ -16,9 +16,13 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
   const [duration, setDuration] = useState(0);
   const [editedText, setEditedText] = useState(script.fullScript);
   const [voiceName, setVoiceName] = useState('am_michael');
+  const hasFiredRef = useRef(false);
 
   useEffect(() => {
-    generateVoice();
+    if (!hasFiredRef.current) {
+      hasFiredRef.current = true;
+      generateVoice();
+    }
   }, []);
 
   const generateVoice = async () => {

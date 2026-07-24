@@ -28,6 +28,9 @@ export class PipelineOrchestrator {
   private wizardState?: WizardState;
   private isRunning: boolean = false;
 
+  private activeVoiceGenerations: Map<string, Promise<{ audioUrl: string; duration: number }>> = new Map();
+  private activeVideoRenders: Map<string, Promise<{ finalVideoUrl: string }>> = new Map();
+
   constructor(
     storageService: StorageService,
     logger: LoggingService,
@@ -143,44 +146,57 @@ export class PipelineOrchestrator {
     runId: string,
     voiceName?: string
   ): Promise<{ audioUrl: string; duration: number }> {
-    const runDir = this.storageService.getRunDir(runId);
-    this.logger.info(`🎙️ Wizard Step 3: Generating Kokoro TTS voice for ${runId}`);
+    if (this.activeVoiceGenerations.has(runId)) {
+      this.logger.info(`🎙️ Joining already active voice generation task for ${runId}`);
+      return this.activeVoiceGenerations.get(runId)!;
+    }
 
-    const voiceMp3Path = this.storageService.getFilePath(runDir, 'voice.mp3');
-    const voiceRes = await this.voiceService.generateVoice(scriptText, voiceMp3Path, voiceName);
-    if (!voiceRes.success) throw new Error(voiceRes.errorMessage || 'Voice generation failed');
-
-    const voiceSize = fs.existsSync(voiceMp3Path) ? fs.statSync(voiceMp3Path).size : 0;
-    const duration = voiceRes.data?.duration || 20;
-    this.logger.info(`Voice generated: ${voiceSize} bytes, ~${duration}s`);
-
-    // Recalibrate master.json scene durations to match exact audio narration length + 2s buffer padding
-    const masterPath = this.storageService.getFilePath(runDir, 'master.json');
-    if (fs.existsSync(masterPath)) {
+    const taskPromise = (async () => {
       try {
-        const masterData = JSON.parse(fs.readFileSync(masterPath, 'utf-8'));
-        if (masterData && Array.isArray(masterData.scenes) && masterData.scenes.length > 0) {
-          const plannedSum = masterData.scenes.reduce((acc: number, s: any) => acc + (s.durationSeconds || 5), 0);
-          const targetVideoDur = Math.ceil(duration + 2.0);
-          if (plannedSum < targetVideoDur) {
-            const extraSec = targetVideoDur - plannedSum;
-            const lastIdx = masterData.scenes.length - 1;
-            masterData.scenes[lastIdx].durationSeconds = (masterData.scenes[lastIdx].durationSeconds || 5) + extraSec;
-            masterData.totalDuration = targetVideoDur;
-            this.storageService.saveJson(runDir, 'master.json', masterData);
-            this.logger.info(`Recalibrated final scene duration (+${extraSec}s padding) to match voice narration (${targetVideoDur}s total)`);
-          }
+        const runDir = this.storageService.getRunDir(runId);
+        this.logger.info(`🎙️ Wizard Step 3: Generating Kokoro TTS voice for ${runId}`);
+
+        const voiceMp3Path = this.storageService.getFilePath(runDir, 'voice.mp3');
+        const voiceRes = await this.voiceService.generateVoice(scriptText, voiceMp3Path, voiceName);
+        if (!voiceRes.success) throw new Error(voiceRes.errorMessage || 'Voice generation failed');
+
+        const voiceSize = fs.existsSync(voiceMp3Path) ? fs.statSync(voiceMp3Path).size : 0;
+        const duration = voiceRes.data?.duration || 20;
+        this.logger.info(`Voice generated: ${voiceSize} bytes, ~${duration}s`);
+
+        // Recalibrate master.json scene durations to match exact audio narration length + 2s buffer padding
+        const masterPath = this.storageService.getFilePath(runDir, 'master.json');
+        if (fs.existsSync(masterPath)) {
+          try {
+            const masterData = JSON.parse(fs.readFileSync(masterPath, 'utf-8'));
+            if (masterData && Array.isArray(masterData.scenes) && masterData.scenes.length > 0) {
+              const plannedSum = masterData.scenes.reduce((acc: number, s: any) => acc + (s.durationSeconds || 5), 0);
+              const targetVideoDur = Math.ceil(duration + 2.0);
+              if (plannedSum < targetVideoDur) {
+                const extraSec = targetVideoDur - plannedSum;
+                const lastIdx = masterData.scenes.length - 1;
+                masterData.scenes[lastIdx].durationSeconds = (masterData.scenes[lastIdx].durationSeconds || 5) + extraSec;
+                masterData.totalDuration = targetVideoDur;
+                this.storageService.saveJson(runDir, 'master.json', masterData);
+                this.logger.info(`Recalibrated final scene duration (+${extraSec}s padding) to match voice narration (${targetVideoDur}s total)`);
+              }
+            }
+          } catch (e) {}
         }
-      } catch (e) {}
-    }
 
-    if (this.wizardState) {
-      this.wizardState.currentStep = 3;
-      this.wizardState.voicePath = voiceMp3Path;
-      this.wizardState.voiceDuration = duration;
-    }
+        if (this.wizardState) {
+          this.wizardState.currentStep = 3;
+          this.wizardState.voicePath = voiceMp3Path;
+          this.wizardState.voiceDuration = duration;
+        }
 
-    return { audioUrl: `/api/runs/${runId}/file/voice.mp3`, duration };
+        return { audioUrl: `/api/runs/${runId}/file/voice.mp3`, duration };
+      } finally {
+        this.activeVoiceGenerations.delete(runId);
+      }
+    })();
+
+    return taskPromise;
   }
 
   // ========================================================================
@@ -272,41 +288,55 @@ export class PipelineOrchestrator {
   public async wizardStep5_Render(
     runId: string
   ): Promise<{ finalVideoUrl: string }> {
-    const runDir = this.storageService.getRunDir(runId);
-    this.logger.info(`🎞️ Wizard Step 5: Rendering final video for ${runId}`);
-
-    // 5a. Generate captions from voice.mp3
-    const voiceMp3Path = this.storageService.getFilePath(runDir, 'voice.mp3');
-    const scriptPath = this.storageService.getFilePath(runDir, 'script.json');
-    const captionsPath = this.storageService.getFilePath(runDir, 'captions.json');
-
-    let scriptText = '';
-    if (fs.existsSync(scriptPath)) {
-      const scriptData = JSON.parse(fs.readFileSync(scriptPath, 'utf-8'));
-      scriptText = scriptData.fullScript || '';
+    if (this.activeVideoRenders.has(runId)) {
+      this.logger.info(`🎞️ Joining already active video render task for ${runId}`);
+      return this.activeVideoRenders.get(runId)!;
     }
 
-    const capsRes = await this.subtitleService.generateCaptions(voiceMp3Path, scriptText, captionsPath);
-    if (!capsRes.success) {
-      this.logger.error(`Captions generation warning: ${capsRes.errorMessage}`);
-    } else {
-      this.logger.info(`Captions generated: ${capsRes.data?.words?.length || 0} words`);
-    }
+    const taskPromise = (async () => {
+      try {
+        const runDir = this.storageService.getRunDir(runId);
+        this.logger.info(`🎞️ Wizard Step 5: Rendering final video for ${runId}`);
 
-    // 5b. Remotion render (includes FFmpeg stitching)
-    const renderRes = await this.remotionService.renderVideo(runDir);
-    if (!renderRes.success) throw new Error(renderRes.errorMessage || 'Render failed');
+        // 5a. Generate captions from voice.mp3
+        const voiceMp3Path = this.storageService.getFilePath(runDir, 'voice.mp3');
+        const scriptPath = this.storageService.getFilePath(runDir, 'script.json');
+        const captionsPath = this.storageService.getFilePath(runDir, 'captions.json');
 
-    const finalMp4Path = this.storageService.getFilePath(runDir, 'render/final.mp4');
-    const renderSize = fs.existsSync(finalMp4Path) ? fs.statSync(finalMp4Path).size : 0;
-    this.logger.info(`✅ Final video rendered: ${(renderSize / 1024 / 1024).toFixed(1)} MB`);
+        let scriptText = '';
+        if (fs.existsSync(scriptPath)) {
+          const scriptData = JSON.parse(fs.readFileSync(scriptPath, 'utf-8'));
+          scriptText = scriptData.fullScript || '';
+        }
 
-    if (this.wizardState) {
-      this.wizardState.currentStep = 5;
-      this.wizardState.finalVideoPath = finalMp4Path;
-    }
+        const capsRes = await this.subtitleService.generateCaptions(voiceMp3Path, scriptText, captionsPath);
+        if (!capsRes.success) {
+          this.logger.error(`Captions generation warning: ${capsRes.errorMessage}`);
+        } else {
+          this.logger.info(`Captions generated: ${capsRes.data?.words?.length || 0} words`);
+        }
 
-    return { finalVideoUrl: `/api/runs/${runId}/file/render/final.mp4` };
+        // 5b. Remotion render (includes FFmpeg stitching)
+        const renderRes = await this.remotionService.renderVideo(runDir);
+        if (!renderRes.success) throw new Error(renderRes.errorMessage || 'Render failed');
+
+        const finalMp4Path = this.storageService.getFilePath(runDir, 'render/final.mp4');
+        const renderSize = fs.existsSync(finalMp4Path) ? fs.statSync(finalMp4Path).size : 0;
+        this.logger.info(`✅ Final video rendered: ${(renderSize / 1024 / 1024).toFixed(1)} MB`);
+
+        if (this.wizardState) {
+          this.wizardState.currentStep = 5;
+          this.wizardState.finalVideoPath = finalMp4Path;
+        }
+
+        return { finalVideoUrl: `/api/runs/${runId}/file/render/final.mp4` };
+      } finally {
+        this.activeVideoRenders.delete(runId);
+      }
+    })();
+
+    this.activeVideoRenders.set(runId, taskPromise);
+    return taskPromise;
   }
 
   // ========================================================================

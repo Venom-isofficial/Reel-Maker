@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { MasterPlan } from '../../backend/types';
 import { Video, Loader2, ArrowRight, ArrowLeft, RefreshCw, CheckCircle, AlertTriangle } from 'lucide-react';
 
@@ -22,9 +22,13 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
   const [clips, setClips] = useState<ClipItem[]>([]);
   const [regenLoading, setRegenLoading] = useState<Record<number, boolean>>({});
   const [editedKeywords, setEditedKeywords] = useState<Record<number, string>>({});
+  const hasFiredRef = useRef(false);
 
   useEffect(() => {
-    generateClips();
+    if (!hasFiredRef.current) {
+      hasFiredRef.current = true;
+      generateClips();
+    }
   }, []);
 
   const generateClips = async () => {
