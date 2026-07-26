@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { AppSettings } from '../../backend/types';
-import { Key, Sliders, Save, CheckCircle2, Mic } from 'lucide-react';
+import { Key, Sliders, Save, CheckCircle2, Mic, Cpu, Zap } from 'lucide-react';
 
 export const SettingsPage: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>({
@@ -9,6 +9,9 @@ export const SettingsPage: React.FC = () => {
     pexelsApiKey: '',
     whisperApiKey: '',
     kokoroVoice: 'am_michael',
+    whisperDevice: 'cuda',
+    whisperComputeType: 'float16',
+    hardwareAcceleration: 'nvenc',
     outputFolder: './workspace',
     videoQuality: '1080p',
     voice: 'am_michael',
@@ -55,11 +58,11 @@ export const SettingsPage: React.FC = () => {
               <Sliders className="w-5 h-5 text-cyan-400" />
               Application & Service Configuration
             </h2>
-            <p className="text-xs text-slate-400 mt-1">Configure your API credentials, voice profile, and output parameters.</p>
+            <p className="text-xs text-slate-400 mt-1">Configure your API credentials, voice profile, and GPU hardware acceleration options.</p>
           </div>
           {saved && (
             <span className="text-xs text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-3 py-1.5 rounded-xl flex items-center gap-1.5 font-medium">
-              <CheckCircle2 className="w-4 h-4" /> Settings Saved!
+              <CheckCircle2 className="w-4 h-4" /> Settings Saved to .env!
             </span>
           )}
         </div>
@@ -100,6 +103,60 @@ export const SettingsPage: React.FC = () => {
                   placeholder="Pexels key..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-500"
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">ElevenLabs API Key</label>
+                <input
+                  type="password"
+                  value={settings.elevenLabsApiKey || ''}
+                  onChange={(e) => handleChange('elevenLabsApiKey', e.target.value)}
+                  placeholder="ElevenLabs key..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* GPU Hardware Acceleration */}
+          <div className="pt-4 border-t border-slate-800">
+            <h3 className="text-sm font-semibold text-slate-300 mb-4 flex items-center gap-2">
+              <Zap className="w-4 h-4 text-emerald-400" /> GPU & Hardware Acceleration
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Whisper Device Target</label>
+                <select
+                  value={settings.whisperDevice || 'cuda'}
+                  onChange={(e) => handleChange('whisperDevice', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="cuda">⚡ CUDA (NVIDIA Dedicated GPU - Recommended)</option>
+                  <option value="cpu">💻 CPU (Integrated Graphics / Fallback)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Whisper Compute Precision</label>
+                <select
+                  value={settings.whisperComputeType || 'float16'}
+                  onChange={(e) => handleChange('whisperComputeType', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="float16">🚀 Float16 (NVIDIA Tensor Core Acceleration)</option>
+                  <option value="int8">⚙️ Int8 (Standard Precision)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Video Encoder Acceleration</label>
+                <select
+                  value={settings.hardwareAcceleration || 'nvenc'}
+                  onChange={(e) => handleChange('hardwareAcceleration', e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="nvenc">🎬 NVIDIA NVENC (Hardware Video Encoding)</option>
+                  <option value="cpu">💻 libx264 (Software CPU Encoding)</option>
+                </select>
               </div>
             </div>
           </div>

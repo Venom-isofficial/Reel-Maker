@@ -1,6 +1,11 @@
 import React from 'react';
 import { Composition, registerRoot } from 'remotion';
+import { loadFont as loadBangers } from '@remotion/google-fonts/Bangers';
+import { loadFont as loadMontserrat } from '@remotion/google-fonts/Montserrat';
 import { ReelComposition } from './ReelComposition';
+
+loadBangers();
+loadMontserrat('italic', { weights: ['900'] });
 
 export const Root: React.FC = () => {
   return (

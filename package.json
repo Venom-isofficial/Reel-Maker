@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@remotion/cli": "^4.0.100",
+    "@remotion/google-fonts": "^4.0.499",
     "@remotion/player": "^4.0.100",
     "axios": "^1.6.8",
     "cors": "^2.8.5",

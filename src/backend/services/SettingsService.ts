@@ -28,7 +28,12 @@ export class SettingsService {
       geminiApiKey: process.env.GEMINI_API_KEY || '',
       pexelsApiKey: process.env.PEXELS_API_KEY || '',
       whisperApiKey: process.env.WHISPER_API_KEY || '',
+      elevenLabsApiKey: process.env.ELEVENLABS_API_KEY || '',
+      ttsProvider: process.env.TTS_PROVIDER || 'kokoro',
       kokoroVoice: process.env.KOKORO_VOICE || 'am_michael',
+      whisperDevice: process.env.WHISPER_DEVICE || 'cuda',
+      whisperComputeType: process.env.WHISPER_COMPUTE_TYPE || 'float16',
+      hardwareAcceleration: process.env.HARDWARE_ACCELERATION || 'nvenc',
       outputFolder: process.env.WORKSPACE_DIR || './workspace',
       videoQuality: process.env.OUTPUT_QUALITY || '1080p',
       voice: process.env.KOKORO_VOICE || 'am_michael',
@@ -46,10 +51,46 @@ export class SettingsService {
     fs.writeFileSync(this.configPath, JSON.stringify(updated, null, 2), 'utf-8');
     
     // Also update process.env for runtime services
-    if (updated.finnhubApiKey) process.env.FINNHUB_API_KEY = updated.finnhubApiKey;
-    if (updated.geminiApiKey) process.env.GEMINI_API_KEY = updated.geminiApiKey;
-    if (updated.pexelsApiKey) process.env.PEXELS_API_KEY = updated.pexelsApiKey;
-    if (updated.whisperApiKey) process.env.WHISPER_API_KEY = updated.whisperApiKey;
+    if (updated.finnhubApiKey !== undefined) process.env.FINNHUB_API_KEY = updated.finnhubApiKey;
+    if (updated.geminiApiKey !== undefined) process.env.GEMINI_API_KEY = updated.geminiApiKey;
+    if (updated.pexelsApiKey !== undefined) process.env.PEXELS_API_KEY = updated.pexelsApiKey;
+    if (updated.whisperApiKey !== undefined) process.env.WHISPER_API_KEY = updated.whisperApiKey;
+    if (updated.elevenLabsApiKey !== undefined) process.env.ELEVENLABS_API_KEY = updated.elevenLabsApiKey;
+    if (updated.ttsProvider !== undefined) process.env.TTS_PROVIDER = updated.ttsProvider;
+    if (updated.whisperDevice !== undefined) process.env.WHISPER_DEVICE = updated.whisperDevice;
+    if (updated.whisperComputeType !== undefined) process.env.WHISPER_COMPUTE_TYPE = updated.whisperComputeType;
+    if (updated.hardwareAcceleration !== undefined) process.env.HARDWARE_ACCELERATION = updated.hardwareAcceleration;
+
+    // Sync to .env file for persistence across server restarts
+    try {
+      const envPath = path.resolve(process.cwd(), '.env');
+      if (fs.existsSync(envPath)) {
+        let envLines = fs.readFileSync(envPath, 'utf-8').split(/\r?\n/);
+        let hasChanges = false;
+        const updateEnvVar = (key: string, val: string) => {
+          const idx = envLines.findIndex((line) => line.trim().startsWith(`${key}=`));
+          if (idx >= 0) {
+            if (envLines[idx] !== `${key}=${val}`) {
+              envLines[idx] = `${key}=${val}`;
+              hasChanges = true;
+            }
+          } else {
+            envLines.push(`${key}=${val}`);
+            hasChanges = true;
+          }
+        };
+        if (updated.elevenLabsApiKey !== undefined) updateEnvVar('ELEVENLABS_API_KEY', updated.elevenLabsApiKey);
+        if (updated.ttsProvider !== undefined) updateEnvVar('TTS_PROVIDER', updated.ttsProvider);
+        if (updated.whisperDevice !== undefined) updateEnvVar('WHISPER_DEVICE', updated.whisperDevice);
+        if (updated.whisperComputeType !== undefined) updateEnvVar('WHISPER_COMPUTE_TYPE', updated.whisperComputeType);
+        if (updated.hardwareAcceleration !== undefined) updateEnvVar('HARDWARE_ACCELERATION', updated.hardwareAcceleration);
+        if (hasChanges) {
+          fs.writeFileSync(envPath, envLines.join('\n'), 'utf-8');
+        }
+      }
+    } catch (envErr) {
+      console.warn('Could not sync settings to .env file:', envErr);
+    }
 
     return updated;
   }

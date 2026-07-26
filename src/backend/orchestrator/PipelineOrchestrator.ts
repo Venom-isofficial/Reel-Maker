@@ -144,7 +144,9 @@ export class PipelineOrchestrator {
   public async wizardStep3_Voice(
     scriptText: string,
     runId: string,
-    voiceName?: string
+    voiceName?: string,
+    provider?: string,
+    elevenLabsApiKey?: string
   ): Promise<{ audioUrl: string; duration: number }> {
     if (this.activeVoiceGenerations.has(runId)) {
       this.logger.info(`🎙️ Joining already active voice generation task for ${runId}`);
@@ -154,10 +156,10 @@ export class PipelineOrchestrator {
     const taskPromise = (async () => {
       try {
         const runDir = this.storageService.getRunDir(runId);
-        this.logger.info(`🎙️ Wizard Step 3: Generating Kokoro TTS voice for ${runId}`);
+        this.logger.info(`🎙️ Wizard Step 3: Generating voice audio (${provider || 'kokoro'}) for ${runId}`);
 
         const voiceMp3Path = this.storageService.getFilePath(runDir, 'voice.mp3');
-        const voiceRes = await this.voiceService.generateVoice(scriptText, voiceMp3Path, voiceName);
+        const voiceRes = await this.voiceService.generateVoice(scriptText, voiceMp3Path, voiceName, provider, elevenLabsApiKey);
         if (!voiceRes.success) throw new Error(voiceRes.errorMessage || 'Voice generation failed');
 
         const voiceSize = fs.existsSync(voiceMp3Path) ? fs.statSync(voiceMp3Path).size : 0;

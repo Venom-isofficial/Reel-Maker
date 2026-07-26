@@ -68,14 +68,35 @@ export class RemotionService {
         const filePath = path.join(baseDir, reqPath);
 
         if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+          const stat = fs.statSync(filePath);
+          const fileSize = stat.size;
           const ext = path.extname(filePath).toLowerCase();
           const contentType = ext === '.mp3' ? 'audio/mpeg' : ext === '.mp4' ? 'video/mp4' : 'application/octet-stream';
-          res.writeHead(200, {
-            'Content-Type': contentType,
-            'Access-Control-Allow-Origin': '*',
-            'Content-Length': fs.statSync(filePath).size
-          });
-          fs.createReadStream(filePath).pipe(res);
+          const range = req.headers.range;
+
+          if (range) {
+            const parts = range.replace(/bytes=/, '').split('-');
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+            const chunksize = end - start + 1;
+            const file = fs.createReadStream(filePath, { start, end });
+            res.writeHead(206, {
+              'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+              'Accept-Ranges': 'bytes',
+              'Content-Length': chunksize,
+              'Content-Type': contentType,
+              'Access-Control-Allow-Origin': '*',
+            });
+            file.pipe(res);
+          } else {
+            res.writeHead(200, {
+              'Content-Type': contentType,
+              'Access-Control-Allow-Origin': '*',
+              'Content-Length': fileSize,
+              'Accept-Ranges': 'bytes',
+            });
+            fs.createReadStream(filePath).pipe(res);
+          }
         } else {
           res.writeHead(404);
           res.end();
@@ -171,11 +192,14 @@ export class RemotionService {
       // 3. Fallback: FFmpeg Subtitle Burn-In Muxer
       if (stitchedLocalPath && fs.existsSync(voicePath)) {
         try {
-          console.log('Burning subtitles and combining audio/video with FFmpeg...');
           let filterChain = '';
-          if (fs.existsSync(srtPath)) {
+          const assPath = path.join(runDir, 'captions.ass');
+          if (fs.existsSync(assPath)) {
+            const escapedAss = assPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+            filterChain = `-vf "ass='${escapedAss}'"`;
+          } else if (fs.existsSync(srtPath)) {
             const escapedSrt = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:');
-            filterChain = `-vf "subtitles='${escapedSrt}':force_style='Fontname=Impact,FontSize=28,PrimaryColour=&H0000FFFF,OutlineColour=&H00000000,BackColour=&H80000000,BorderStyle=4,Outline=2,Shadow=2,Alignment=2,MarginV=100,Bold=1'"`;
+            filterChain = `-vf "subtitles='${escapedSrt}':force_style='Fontname=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=2,Alignment=2,MarginV=120,Bold=1,Italic=1'"`;
           }
 
           const muxCmd = `ffmpeg -y -i "${stitchedLocalPath.replace(/\\/g, '/')}" -i "${voicePath.replace(/\\/g, '/')}" ${filterChain} -c:v libx264 -preset ultrafast -c:a aac -shortest "${finalMp4Path.replace(/\\/g, '/')}"`;

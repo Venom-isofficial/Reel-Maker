@@ -1,0 +1,17 @@
+{
+  "finnhubApiKey": "d8u294pr01qinhufaab0d8u294pr01qinhufaabg",
+  "geminiApiKey": "AQ.Ab8RN6Kll0Oeuu_qZdrK2_iNFlG81HFdjDliGMILrqSwumGofg",
+  "pexelsApiKey": "RGJ5QfAvH6JNwu0jQ8kmdIIl3WeMsZAOE73deZvdHfhP5dzPCpXJRppD",
+  "whisperApiKey": "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",
+  "elevenLabsApiKey": "",
+  "ttsProvider": "kokoro",
+  "kokoroVoice": "am_michael",
+  "outputFolder": "./workspace",
+  "videoQuality": "720p",
+  "voice": "am_michael",
+  "subtitleStyle": "animated-highlight",
+  "theme": "dark",
+  "logoUrl": "",
+  "watermarkText": "AI Reel Factory",
+  "bgMusicPath": ""
+}

@@ -39,8 +39,8 @@ export class SubtitleService {
       phraseEnd = w.end;
 
       const isSentenceEnd = /[.?!]/.test(w.word);
-      const isClauseEnd = /[:;]/.test(w.word) && currentPhrase.length >= 6;
-      const isMaxWords = currentPhrase.length >= 11;
+      const isClauseEnd = /[:;,]/.test(w.word);
+      const isMaxWords = currentPhrase.length >= 3;
       const isLast = i === words.length - 1;
 
       if (isSentenceEnd || isClauseEnd || isMaxWords || isLast) {
@@ -58,6 +58,75 @@ export class SubtitleService {
     });
 
     fs.writeFileSync(srtFilePath, srtLines.join('\n'), 'utf-8');
+  }
+
+  public writeAssFile(words: CaptionWord[], assFilePath: string) {
+    const formatAssTime = (sec: number) => {
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = Math.floor(sec % 60);
+      const cs = Math.floor((sec % 1) * 100);
+      return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+    };
+
+    // Group words into 3-word chunks
+    const MAX_WORDS = 3;
+    const phrases: CaptionWord[][] = [];
+    let current: CaptionWord[] = [];
+
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      current.push(w);
+      const isEnd = /[.?!;,]/.test(w.word) || current.length >= MAX_WORDS || i === words.length - 1;
+      if (isEnd) {
+        phrases.push(current);
+        current = [];
+      }
+    }
+
+    const events: string[] = [];
+
+    for (const chunk of phrases) {
+      if (chunk.length === 0) continue;
+      for (let idx = 0; idx < chunk.length; idx++) {
+        const activeWord = chunk[idx];
+        const nextWord = chunk[idx + 1];
+        const start = activeWord.start - 0.05;
+        const end = nextWord ? nextWord.start - 0.01 : activeWord.end + 0.25;
+
+        // Build line with active word in Yellow (\c&H00FFFF&) and inactive in White (\c&HFFFFFF&)
+        const lineText = chunk
+          .map((item, itemIdx) => {
+            const clean = item.word.replace(/[.?!;,]/g, '').toUpperCase();
+            if (itemIdx === idx) {
+              return `{\\c&H00FFFF&}${clean}{\\c&HFFFFFF&}`;
+            }
+            return clean;
+          })
+          .join(' ');
+
+        events.push(
+          `Dialogue: 0,${formatAssTime(start)},${formatAssTime(end)},Default,,0,0,0,,${lineText}`
+        );
+      }
+    }
+
+    const assContent = `[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,54,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,1,1,0,0,100,100,2,0,1,3.5,2,2,40,40,220,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+${events.join('\n')}
+`;
+
+    fs.writeFileSync(assFilePath, assContent, 'utf-8');
   }
 
   private async getAudioDuration(filePath: string): Promise<number> {
@@ -135,6 +204,11 @@ export class SubtitleService {
         fs.writeFileSync(outputCaptionsPath, JSON.stringify(captionData, null, 2), 'utf-8');
         this.writeSrtFile(finalWords, srtPath);
       }
+
+      // Always write clean 3-word chunked SRT and ASS files for subtitle burn-in fallbacks
+      const assPath = path.join(path.dirname(outputCaptionsPath), 'captions.ass');
+      this.writeSrtFile(finalWords, srtPath);
+      this.writeAssFile(finalWords, assPath);
 
       const captionData: CaptionData = {
         fullText,

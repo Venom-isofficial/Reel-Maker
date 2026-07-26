@@ -131,7 +131,12 @@ export interface AppSettings {
   geminiApiKey: string;
   pexelsApiKey: string;
   whisperApiKey: string;
+  elevenLabsApiKey?: string;
+  ttsProvider?: string;
   kokoroVoice: string;
+  whisperDevice?: string;
+  whisperComputeType?: string;
+  hardwareAcceleration?: string;
   outputFolder: string;
   videoQuality: string;
   voice: string;

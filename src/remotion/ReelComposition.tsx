@@ -47,31 +47,6 @@ export const ReelComposition: React.FC<ReelCompositionProps> = ({
       {/* Top Progress Bar */}
       <ProgressBar />
 
-      {/* Watermark Logo Badge */}
-      <div
-        style={{
-          position: 'absolute',
-          top: '45px',
-          left: '45px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          padding: '12px 24px',
-          background: 'rgba(15, 23, 42, 0.85)',
-          backdropFilter: 'blur(14px)',
-          borderRadius: '32px',
-          border: '1px solid rgba(255,255,255,0.22)',
-          boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
-          maxWidth: '990px',
-          zIndex: 90,
-        }}
-      >
-        <div style={{ width: '14px', height: '14px', borderRadius: '50%', backgroundColor: '#38bdf8', boxShadow: '0 0 12px #38bdf8', flexShrink: 0 }} />
-        <span style={{ fontFamily: 'Inter', fontSize: '20px', fontWeight: '800', color: '#f8fafc', letterSpacing: '1.2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {watermarkText.startsWith('Nexus -') ? watermarkText : `Nexus - ${watermarkText}`}
-        </span>
-      </div>
-
       {/* Main Video Background: Stitched Video or Sequential Clips */}
       {stitchedVideoPath ? (
         <OffthreadVideo

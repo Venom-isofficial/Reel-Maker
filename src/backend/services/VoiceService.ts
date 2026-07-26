@@ -36,14 +36,94 @@ export class VoiceService {
     return 0;
   }
 
+  public async generateVoiceElevenLabs(
+    scriptText: string,
+    outputMp3Path: string,
+    voiceId: string = 'pNInz6obpgDQGcFmaJgB',
+    apiKey?: string
+  ): Promise<ServiceResult<{ audioPath: string; duration: number }>> {
+    const key = apiKey || process.env.ELEVENLABS_API_KEY || '';
+    if (!key) {
+      return {
+        success: false,
+        retryable: false,
+        errorMessage: 'ElevenLabs API Key is missing. Please enter your ElevenLabs API Key in Settings or the Voice menu.',
+      };
+    }
+
+    try {
+      console.log(`Generating ElevenLabs Cloud AI TTS (Voice ID: ${voiceId})...`);
+      const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+      const response = await axios.post(
+        url,
+        {
+          text: scriptText,
+          model_id: 'eleven_multilingual_v2',
+          voice_settings: {
+            stability: 0.5,
+            similarity_boost: 0.75,
+          },
+        },
+        {
+          headers: {
+            'xi-api-key': key,
+            'Content-Type': 'application/json',
+            Accept: 'audio/mpeg',
+          },
+          responseType: 'arraybuffer',
+          timeout: 45000,
+        }
+      );
+
+      if (response.data) {
+        fs.writeFileSync(outputMp3Path, Buffer.from(response.data));
+        const exactDur = await this.getExactAudioDuration(outputMp3Path);
+        const duration = exactDur || Math.max(15, Math.ceil(scriptText.split(' ').length / 2.8));
+        console.log(`✅ ElevenLabs Voice MP3 generated successfully (${fs.statSync(outputMp3Path).size} bytes, duration: ${duration}s)`);
+        return {
+          success: true,
+          retryable: false,
+          data: { audioPath: outputMp3Path, duration },
+        };
+      }
+    } catch (err: any) {
+      const msg = err.response?.data
+        ? (Buffer.isBuffer(err.response.data) ? err.response.data.toString() : JSON.stringify(err.response.data))
+        : err.message;
+      console.error('ElevenLabs TTS Error:', msg);
+      return {
+        success: false,
+        retryable: true,
+        errorMessage: `ElevenLabs TTS failed: ${msg}`,
+      };
+    }
+
+    return { success: false, retryable: true, errorMessage: 'ElevenLabs returned empty audio response' };
+  }
+
   public async generateVoice(
     scriptText: string,
     outputMp3Path: string,
-    voiceName: string = process.env.KOKORO_VOICE || 'am_michael'
+    voiceName: string = process.env.KOKORO_VOICE || 'am_michael',
+    provider?: string,
+    elevenLabsApiKey?: string
   ): Promise<ServiceResult<{ audioPath: string; duration: number }>> {
     try {
       const dir = path.dirname(outputMp3Path);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+      const ttsEngine = provider || process.env.TTS_PROVIDER || 'kokoro';
+
+      // 0. ElevenLabs Cloud AI TTS Engine (if requested or configured)
+      if (ttsEngine === 'elevenlabs' || (elevenLabsApiKey && elevenLabsApiKey.length > 5)) {
+        // Default to Adam voice ID (pNInz6obpgDQGcFmaJgB) if voiceName is a Kokoro name or unconfigured
+        const elVoice = (voiceName && !voiceName.startsWith('am_') && !voiceName.startsWith('af_') && !voiceName.startsWith('bm_'))
+          ? voiceName
+          : 'pNInz6obpgDQGcFmaJgB';
+        const elRes = await this.generateVoiceElevenLabs(scriptText, outputMp3Path, elVoice, elevenLabsApiKey);
+        if (elRes.success) return elRes;
+        console.warn('ElevenLabs TTS failed or unconfigured, falling back to local Kokoro TTS:', elRes.errorMessage);
+      }
 
       // 1. Kokoro Local Studio ONNX TTS Engine (Zero API Key / Zero Cost / Local Studio Quality)
       try {
