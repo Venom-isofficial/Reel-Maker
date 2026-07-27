@@ -16,9 +16,10 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
   const [duration, setDuration] = useState(0);
   const [editedText, setEditedText] = useState(script.fullScript);
   
-  // Provider: 'kokoro' | 'elevenlabs'
-  const [provider, setProvider] = useState<'kokoro' | 'elevenlabs'>('kokoro');
+  // Provider: 'kokoro' | 'chatterbox' | 'elevenlabs'
+  const [provider, setProvider] = useState<'kokoro' | 'chatterbox' | 'elevenlabs'>('kokoro');
   const [kokoroVoice, setKokoroVoice] = useState('am_michael');
+  const [chatterboxVoice, setChatterboxVoice] = useState('en-US-ChristopherNeural');
   const [elevenLabsVoice, setElevenLabsVoice] = useState('pNInz6obpgDQGcFmaJgB');
   const [customVoiceId, setCustomVoiceId] = useState('');
   const [elevenLabsApiKey, setElevenLabsApiKey] = useState('');
@@ -32,7 +33,7 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
       .then((res) => res.json())
       .then((data) => {
         if (data.elevenLabsApiKey) setElevenLabsApiKey(data.elevenLabsApiKey);
-        if (data.ttsProvider) setProvider(data.ttsProvider as 'kokoro' | 'elevenlabs');
+        if (data.ttsProvider) setProvider(data.ttsProvider as 'kokoro' | 'chatterbox' | 'elevenlabs');
         if (data.kokoroVoice) setKokoroVoice(data.kokoroVoice);
       })
       .catch((err) => console.warn('Could not load settings:', err));
@@ -60,6 +61,8 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
     try {
       const selectedVoice = provider === 'elevenlabs' 
         ? (elevenLabsVoice === 'custom' ? customVoiceId.trim() : elevenLabsVoice)
+        : provider === 'chatterbox'
+        ? chatterboxVoice
         : kokoroVoice;
 
       if (provider === 'elevenlabs' && (!elevenLabsApiKey || elevenLabsApiKey.trim().length < 5)) {
@@ -105,6 +108,17 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
     { value: 'af_bella', label: '🎙️ Bella (Female Dynamic)' },
     { value: 'af_nicole', label: '🎙️ Nicole (Female Professional)' },
     { value: 'bf_emma', label: '🎙️ Emma (British Female Storyteller)' },
+  ];
+
+  const CHATTERBOX_VOICES = [
+    { value: 'en-US-ChristopherNeural', label: '🎙️ Christopher (Male Deep News Anchor - Default)' },
+    { value: 'en-US-GuyNeural', label: '🎙️ Guy (Male High-Energy Deep)' },
+    { value: 'en-US-EricNeural', label: '🎙️ Eric (Male Deep Resonant)' },
+    { value: 'en-US-AndrewNeural', label: '🎙️ Andrew (Male Authoritative News)' },
+    { value: 'en-US-BrianNeural', label: '🎙️ Brian (Male Professional Narration)' },
+    { value: 'en-GB-RyanNeural', label: '🎙️ Ryan (British Male Financial)' },
+    { value: 'en-US-JennyNeural', label: '🎙️ Jenny (Female Dynamic)' },
+    { value: 'en-US-AriaNeural', label: '🎙️ Aria (Female Professional News)' },
   ];
 
   const ELEVENLABS_VOICES = [
@@ -164,8 +178,8 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
           </button>
         </div>
 
-        {/* Provider Toggle Tabs */}
-        <div className="grid grid-cols-2 gap-3 mb-5">
+        {/* Provider Toggle Tabs (3-Column Grid) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
           <button
             type="button"
             onClick={() => setProvider('kokoro')}
@@ -184,6 +198,26 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
               </span>
             </div>
             <p className="text-xs text-slate-400">Fast ONNX offline studio voice generation. Zero API keys required.</p>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setProvider('chatterbox')}
+            className={`p-4 rounded-xl border text-left transition ${
+              provider === 'chatterbox'
+                ? 'bg-emerald-950/40 border-emerald-500 text-white shadow-lg shadow-emerald-500/10'
+                : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-sm font-bold flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-emerald-400" /> Chatterbox MAX
+              </span>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950 border border-emerald-700 text-emerald-300">
+                Neural AI
+              </span>
+            </div>
+            <p className="text-xs text-slate-400">Ultra-high fidelity neural studio voices with natural intonation.</p>
           </button>
 
           <button
@@ -250,6 +284,52 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
                   value={ttsSpeed}
                   onChange={(e) => setTtsSpeed(parseFloat(e.target.value) || 1.15)}
                   className="w-16 bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-center font-mono text-cyan-300 font-bold focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+            </div>
+          </div>
+        ) : provider === 'chatterbox' ? (
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="sm:col-span-2">
+              <label className="block text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">
+                Chatterbox MAX Voice Profile
+              </label>
+              <select
+                value={chatterboxVoice}
+                onChange={(e) => setChatterboxVoice(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 font-medium"
+              >
+                {CHATTERBOX_VOICES.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                  Speaking Speed
+                </label>
+                <span className="text-xs font-mono font-bold text-emerald-400">{ttsSpeed.toFixed(2)}x</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="0.80"
+                  max="1.50"
+                  step="0.05"
+                  value={ttsSpeed}
+                  onChange={(e) => setTtsSpeed(parseFloat(e.target.value))}
+                  className="w-full accent-emerald-400 cursor-pointer"
+                />
+                <input
+                  type="number"
+                  min="0.80"
+                  max="1.50"
+                  step="0.05"
+                  value={ttsSpeed}
+                  onChange={(e) => setTtsSpeed(parseFloat(e.target.value) || 1.15)}
+                  className="w-16 bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-center font-mono text-emerald-300 font-bold focus:outline-none focus:border-emerald-500"
                 />
               </div>
             </div>

@@ -140,12 +140,42 @@ export class VoiceService {
 
       // 0. ElevenLabs Cloud AI TTS Engine (only if provider is explicitly set to elevenlabs)
       if (ttsEngine === 'elevenlabs') {
-        const elVoice = (voiceName && !voiceName.startsWith('am_') && !voiceName.startsWith('af_') && !voiceName.startsWith('bm_') && !voiceName.startsWith('bf_'))
+        const elVoice = (voiceName && !voiceName.startsWith('am_') && !voiceName.startsWith('af_') && !voiceName.startsWith('bm_') && !voiceName.startsWith('bf_') && !voiceName.startsWith('en-'))
           ? voiceName
           : 'pNInz6obpgDQGcFmaJgB';
         const elRes = await this.generateVoiceElevenLabs(scriptText, outputMp3Path, elVoice, elevenLabsApiKey);
         if (elRes.success) return elRes;
-        console.warn('ElevenLabs TTS failed or unconfigured, falling back to local Kokoro TTS:', elRes.errorMessage);
+        console.warn('ElevenLabs TTS failed or unconfigured, falling back to local Chatterbox / Kokoro TTS:', elRes.errorMessage);
+      }
+
+      // 0b. Chatterbox MAX Neural Studio Engine (High Fidelity Neural Voices)
+      if (ttsEngine === 'chatterbox') {
+        try {
+          const pythonScript = path.resolve(process.cwd(), 'scripts/chatterbox_tts.py');
+          if (fs.existsSync(pythonScript)) {
+            const cbVoice = voiceName || 'en-US-ChristopherNeural';
+            console.log(`Generating studio voice audio via Chatterbox MAX Neural TTS (voice: ${cbVoice}, speed: ${speedVal}x)...`);
+
+            const tempTxtPath = path.join(dir, 'script_prompt.txt');
+            fs.writeFileSync(tempTxtPath, scriptText, 'utf-8');
+
+            const cmd = `python "${pythonScript.replace(/\\/g, '/')}" "${tempTxtPath.replace(/\\/g, '/')}" "${outputMp3Path.replace(/\\/g, '/')}" "${cbVoice}" "${speedVal}"`;
+            await execAsync(cmd, { timeout: 60000 });
+
+            if (fs.existsSync(outputMp3Path) && fs.statSync(outputMp3Path).size > 1000) {
+              const exactDur = await this.getExactAudioDuration(outputMp3Path);
+              const duration = exactDur || Math.max(12, Math.ceil(scriptText.split(' ').length / 3.2));
+              console.log(`✅ Chatterbox MAX Voice MP3 created successfully (${fs.statSync(outputMp3Path).size} bytes, exact audio duration: ${duration}s)`);
+              return {
+                success: true,
+                retryable: false,
+                data: { audioPath: outputMp3Path, duration },
+              };
+            }
+          }
+        } catch (cbErr: any) {
+          console.warn('Chatterbox MAX TTS warning, falling back to Kokoro:', cbErr.message);
+        }
       }
 
       // 1. Kokoro Local Studio ONNX TTS Engine (Zero API Key / Zero Cost / Local Studio Quality)
