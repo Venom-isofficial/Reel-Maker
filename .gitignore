@@ -20,6 +20,7 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+setings.json
 
 # Project Generated Workspace & Renders
 /workspace/
