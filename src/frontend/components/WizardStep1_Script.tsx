@@ -3,6 +3,10 @@ import { ScriptOutput, NewsArticle, GeminiAnalysis } from '../../backend/types';
 import { Newspaper, Sparkles, Loader2, ArrowRight, Edit3 } from 'lucide-react';
 
 interface Props {
+  initialScript?: ScriptOutput | null;
+  initialArticle?: NewsArticle | null;
+  initialAnalysis?: GeminiAnalysis | null;
+  initialRunId?: string | null;
   onComplete: (data: {
     article: NewsArticle;
     analysis: GeminiAnalysis;
@@ -11,14 +15,20 @@ interface Props {
   }) => void;
 }
 
-export const WizardStep1_Script: React.FC<Props> = ({ onComplete }) => {
+export const WizardStep1_Script: React.FC<Props> = ({
+  initialScript,
+  initialArticle,
+  initialAnalysis,
+  initialRunId,
+  onComplete,
+}) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [article, setArticle] = useState<NewsArticle | null>(null);
-  const [analysis, setAnalysis] = useState<GeminiAnalysis | null>(null);
-  const [script, setScript] = useState<ScriptOutput | null>(null);
-  const [runId, setRunId] = useState<string | null>(null);
-  const [editedScript, setEditedScript] = useState('');
+  const [article, setArticle] = useState<NewsArticle | null>(initialArticle || null);
+  const [analysis, setAnalysis] = useState<GeminiAnalysis | null>(initialAnalysis || null);
+  const [script, setScript] = useState<ScriptOutput | null>(initialScript || null);
+  const [runId, setRunId] = useState<string | null>(initialRunId || null);
+  const [editedScript, setEditedScript] = useState(initialScript?.fullScript || '');
 
   const handleGenerate = async () => {
     setLoading(true);
@@ -164,14 +174,28 @@ export const WizardStep1_Script: React.FC<Props> = ({ onComplete }) => {
                 rows={6}
                 className="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 leading-relaxed focus:outline-none focus:border-cyan-500 resize-y"
               />
-              <p className="text-[10px] text-slate-500 mt-1">{editedScript.split(' ').length} words • ~{Math.ceil(editedScript.split(' ').length / 2.8)}s estimated duration</p>
+              <p className="text-[10px] text-slate-400 mt-1 flex items-center justify-between">
+                <span>{editedScript.split(' ').filter(Boolean).length} words • ~{Math.ceil(editedScript.split(' ').filter(Boolean).length / 2.7)}s speech target</span>
+                <span className={editedScript.split(' ').filter(Boolean).length <= 75 ? 'text-emerald-400 font-semibold' : 'text-amber-400 font-semibold'}>
+                  {editedScript.split(' ').filter(Boolean).length <= 75 ? '⚡ Ideal for 25–30s Reel' : '⚠️ Long text: may exceed 30s'}
+                </span>
+              </p>
             </div>
           </div>
 
-          {/* Next Button */}
-          <div className="flex justify-end">
+          {/* Action Buttons */}
+          <div className="flex items-center justify-between pt-2">
+            <button
+              onClick={handleGenerate}
+              disabled={loading}
+              className="px-5 py-2.5 rounded-xl text-xs font-semibold text-slate-300 bg-slate-900 border border-slate-800 hover:bg-slate-800 flex items-center gap-2 transition"
+            >
+              <Sparkles className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-cyan-400' : 'text-amber-400'}`} /> Fetch Different News Headline
+            </button>
+
             <button
               onClick={handleNext}
+              disabled={loading}
               className="glow-button px-7 py-3.5 rounded-2xl text-sm font-bold text-white flex items-center gap-2.5"
             >
               Next: Scene Planning <ArrowRight className="w-4 h-4" />

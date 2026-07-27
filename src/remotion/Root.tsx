@@ -19,8 +19,9 @@ export const Root: React.FC = () => {
           const scenes: any[] = (props && Array.isArray(props.scenes)) ? props.scenes : [];
           const scenesTotal = scenes.reduce((acc: number, s: any) => acc + (s.durationSeconds || 5), 0);
 
-          // Calculate exact video duration in seconds with 2.0s padding so speech narration NEVER cuts off
-          const durationSeconds = Math.max(lastWordEnd + 2.0, scenesTotal + 1.5, 30);
+          // Calculate exact video duration in seconds (capped strictly under 30s)
+          const rawDuration = Math.max(lastWordEnd + 0.8, scenesTotal + 0.5, 24);
+          const durationSeconds = Math.min(29.5, rawDuration);
           return {
             durationInFrames: Math.ceil(durationSeconds * 30),
           };

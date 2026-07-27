@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
-import { GeminiAnalysis, ScriptOutput, MasterPlan, VideoMetadata, VideoKeywords, ServiceResult, NewsArticle } from '../types';
+import { GeminiAnalysis, ScriptOutput, MasterPlan, SceneItem, VideoMetadata, VideoKeywords, ServiceResult, NewsArticle } from '../types';
 
 export class AIService {
   private apiKey: string;
@@ -114,16 +114,16 @@ export class AIService {
         }
       }
 
-      // Dynamic contextual fallback tailored to the actual news story
-      const directHook = analysis.summary || "Major news in global markets standardizing key trends.";
+      // Dynamic contextual fallback tailored to the actual news story (tight 60 words target)
+      const directHook = analysis.summary ? `${analysis.summary.split('.')[0]}.` : "Global energy and financial markets just suffered a sudden unexpected shock wave.";
       const topic = analysis.topic || 'Business Policy';
-      const entity = (analysis.entities && analysis.entities.length > 0) ? analysis.entities[0] : 'Industry leaders';
-      const keywordsStr = (analysis.keywords && analysis.keywords.length > 0) ? analysis.keywords.join(', ') : 'market shifts';
+      const entity = (analysis.entities && analysis.entities.length > 0) ? analysis.entities[0] : 'Top analysts';
+      const keywordsStr = (analysis.keywords && analysis.keywords.length > 0) ? analysis.keywords.join(' ') : 'market shifts';
 
-      const introduction = `${entity} and key analysts are closely tracking these swift shifts in ${topic.toLowerCase()}.`;
-      const body = `As key changes take effect around ${keywordsStr}, investors are closely watching the financial domino effect.`;
-      const ending = `With billions of dollars hanging in the balance, market sentiment is rapidly shifting.`;
-      const cta = `Will this move trigger the next major market rally, or are investors heading straight into a massive trap? Drop your take below!`;
+      const introduction = `${entity} are tracking rapid shifts in ${topic.toLowerCase()}.`;
+      const body = `With major moves around ${keywordsStr}, investors are bracing for impact.`;
+      const ending = `Millions of dollars hang in the balance.`;
+      const cta = `Will markets recover, or is a major crash next? Drop your take below!`;
       const fullScript = `${directHook} ${introduction} ${body} ${ending} ${cta}`;
 
       const dynamicScript: ScriptOutput = {
@@ -140,52 +140,120 @@ export class AIService {
     }
   }
 
+  public chunkFullScriptIntoScenes(fullScriptText: string, targetNumScenes: number = 6): SceneItem[] {
+    const text = (fullScriptText || '').trim();
+    if (!text) return [];
+
+    // Split text into sentences using sentence punctuation boundaries
+    const sentenceRegex = /[^.!?]+[.!?]+/g;
+    const matchedSentences = text.match(sentenceRegex);
+    let sentences = matchedSentences ? matchedSentences.map(s => s.trim()).filter(Boolean) : [text];
+
+    // If leftover text after regex matching, append it
+    const matchedLength = sentences.join(' ').length;
+    if (matchedLength < text.length) {
+      const remainder = text.substring(matchedLength).trim();
+      if (remainder) sentences.push(remainder);
+    }
+
+    let sceneTexts: string[] = [];
+
+    if (sentences.length >= targetNumScenes) {
+      // Evenly distribute sentences into targetNumScenes groups
+      sceneTexts = Array.from({ length: targetNumScenes }, () => '');
+      sentences.forEach((sentence, idx) => {
+        const sceneIdx = Math.min(targetNumScenes - 1, Math.floor((idx / sentences.length) * targetNumScenes));
+        sceneTexts[sceneIdx] = sceneTexts[sceneIdx] ? `${sceneTexts[sceneIdx]} ${sentence}` : sentence;
+      });
+      sceneTexts = sceneTexts.filter(Boolean);
+    }
+
+    // If we still have fewer than targetNumScenes, split by words into targetNumScenes contiguous chunks
+    if (sceneTexts.length < targetNumScenes) {
+      const words = text.split(/\s+/).filter(Boolean);
+      const wordsPerScene = Math.max(1, Math.ceil(words.length / targetNumScenes));
+      sceneTexts = [];
+      for (let i = 0; i < targetNumScenes; i++) {
+        const start = i * wordsPerScene;
+        const end = i === targetNumScenes - 1 ? words.length : (i + 1) * wordsPerScene;
+        const chunk = words.slice(start, end).join(' ');
+        if (chunk) sceneTexts.push(chunk);
+      }
+    }
+
+    const extractKeywordsFromText = (str: string): string => {
+      const cleanWords = str.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 3 && !['this', 'that', 'with', 'from', 'have', 'more', 'about', 'will', 'these', 'their', 'they', 'what', 'which', 'when', 'shows', 'email', 'warn', 'reuters', 'breaking', 'news'].includes(w));
+      return Array.from(new Set(cleanWords)).slice(0, 3).join(' ') || 'business market';
+    };
+
+    const transitions = ['fade', 'zoom-in', 'wipe', 'cross-dissolve', 'fade', 'zoom-in'];
+
+    return sceneTexts.map((narrationText, idx) => {
+      const kw = extractKeywordsFromText(narrationText);
+      const isHook = idx === 0;
+      const isCta = idx === sceneTexts.length - 1;
+      const dur = isHook ? 4.5 : isCta ? 4 : 4.5;
+
+      return {
+        sceneNumber: idx + 1,
+        durationSeconds: dur,
+        narrationText,
+        subtitleText: narrationText.split(' ').slice(0, 5).join(' '),
+        videoPrompt: isHook
+          ? `Vertical 9:16 cinematic dramatic visual of ${kw}`
+          : isCta
+          ? `Vertical 9:16 mobile phone screen showing social media discussion`
+          : `Vertical 9:16 photorealistic visual of ${kw}`,
+        transition: transitions[idx % transitions.length],
+        status: 'pending',
+        retries: 0
+      };
+    });
+  }
+
   public async planScenes(script: ScriptOutput): Promise<ServiceResult<MasterPlan>> {
+    const fullText = (script.fullScript || `${script.hook || ''} ${script.introduction || ''} ${script.body || ''} ${script.ending || ''} ${script.cta || ''}`).trim();
+
     try {
       if (this.apiKey) {
         try {
           const template = this.getPromptTemplate('scene_planner');
-          const prompt = template.replace('{{SCRIPT_JSON}}', JSON.stringify(script, null, 2));
+          const prompt = template.replace('{{SCRIPT_JSON}}', JSON.stringify({ ...script, fullScript: fullText }, null, 2));
           const responseText = await this.callGeminiApi(prompt);
           const parsed = this.cleanJsonResponse(responseText);
 
-          if (parsed.scenes && Array.isArray(parsed.scenes)) {
-            parsed.scenes = parsed.scenes.map((sc: any, idx: number) => ({
-              ...sc,
-              sceneNumber: sc.sceneNumber || idx + 1,
-              status: 'pending',
-              retries: 0
-            }));
+          if (parsed.scenes && Array.isArray(parsed.scenes) && parsed.scenes.length > 0) {
+            const totalGeminiWords = parsed.scenes.map((s: any) => s.narrationText || '').join(' ').split(/\s+/).length;
+            const targetWords = fullText.split(/\s+/).length;
+
+            // Verify Gemini didn't alter or drop narration text
+            if (Math.abs(totalGeminiWords - targetWords) <= 10) {
+              parsed.scenes = parsed.scenes.map((sc: any, idx: number) => ({
+                ...sc,
+                sceneNumber: sc.sceneNumber || idx + 1,
+                status: 'pending',
+                retries: 0
+              }));
+              return { success: true, retryable: false, data: parsed };
+            }
           }
-          return { success: true, retryable: false, data: parsed };
         } catch (apiErr: any) {
-          console.warn("Gemini Scene Planner API quota limit, using contextual fallback:", apiErr.message);
+          console.warn("Gemini Scene Planner API note, using deterministic script chunker:", apiErr.message);
         }
       }
 
-      // Extract main topics dynamically from script text
-      const extractKeywordsFromText = (str: string): string => {
-        const words = str.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 3 && !['this', 'that', 'with', 'from', 'have', 'more', 'about', 'will', 'these', 'their', 'they', 'what', 'which', 'when', 'shows', 'email', 'warn', 'reuters', 'breaking', 'news'].includes(w));
-        return Array.from(new Set(words)).slice(0, 3).join(' ') || 'business finance';
-      };
+      // Fallback: Deterministic exact script chunker — ZERO word alterations or fake text
+      const scenes = this.chunkFullScriptIntoScenes(fullText, 6);
+      const computedDuration = scenes.reduce((acc, s) => acc + s.durationSeconds, 0);
 
-      const kw1 = extractKeywordsFromText(script.hook);
-      const kw2 = extractKeywordsFromText(script.introduction);
-      const kw3 = extractKeywordsFromText(script.body);
-      const kw4 = extractKeywordsFromText(script.ending);
-
-      const mockScenes: MasterPlan = {
-        totalDuration: 35,
-        scenes: [
-          { sceneNumber: 1, durationSeconds: 5, narrationText: script.hook, subtitleText: script.hook, videoPrompt: `Vertical 9:16 cinematic visual of ${kw1}`, transition: "fade", status: "pending", retries: 0 },
-          { sceneNumber: 2, durationSeconds: 5, narrationText: script.introduction, subtitleText: script.introduction, videoPrompt: `Vertical 9:16 photorealistic visual of ${kw2}`, transition: "zoom-in", status: "pending", retries: 0 },
-          { sceneNumber: 3, durationSeconds: 6, narrationText: script.body.substring(0, 80), subtitleText: "Market & Industry Impact", videoPrompt: `Vertical 9:16 footage showing ${kw3}`, transition: "wipe", status: "pending", retries: 0 },
-          { sceneNumber: 4, durationSeconds: 5, narrationText: script.body.substring(80) || script.body, subtitleText: "Global Trade Watch", videoPrompt: `Vertical 9:16 footage of ${kw3} business economy`, transition: "cross-dissolve", status: "pending", retries: 0 },
-          { sceneNumber: 5, durationSeconds: 5, narrationText: script.ending, subtitleText: "Market Outlook", videoPrompt: `Vertical 9:16 dramatic scene of ${kw4}`, transition: "fade", status: "pending", retries: 0 },
-          { sceneNumber: 6, durationSeconds: 5, narrationText: script.cta, subtitleText: "Comment Your Opinion Below!", videoPrompt: "Vertical 9:16 mobile phone screen showing social media discussion", transition: "zoom-in", status: "pending", retries: 0 }
-        ]
+      return {
+        success: true,
+        retryable: false,
+        data: {
+          totalDuration: computedDuration,
+          scenes,
+        },
       };
-      return { success: true, retryable: false, data: mockScenes };
     } catch (err: any) {
       return { success: false, retryable: true, errorMessage: `Scene planning failed: ${err.message}` };
     }

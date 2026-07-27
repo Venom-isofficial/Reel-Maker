@@ -171,12 +171,20 @@ export class RemotionService {
         const propsJsonPath = path.join(runDir, 'remotion_props.json');
         fs.writeFileSync(propsJsonPath, JSON.stringify(propsObj, null, 2), 'utf-8');
 
-        // 2. Remotion CLI Render with NVIDIA GPU acceleration flags
+        // 2. Remotion CLI Render with explicit NVIDIA discrete GPU preference flags
         const rootPath = path.resolve(process.cwd(), 'src/remotion/Root.tsx');
-        const cmd = `npx remotion render "${rootPath.replace(/\\/g, '/')}" ReelComposition "${finalMp4Path.replace(/\\/g, '/')}" --props="${propsJsonPath.replace(/\\/g, '/')}" --gl=angle --enable-gpu --concurrency=2`;
+        const cmd = `npx remotion render "${rootPath.replace(/\\/g, '/')}" ReelComposition "${finalMp4Path.replace(/\\/g, '/')}" --props="${propsJsonPath.replace(/\\/g, '/')}" --gl=angle --enable-gpu --chromium-flags="--ignore-gpu-blocklist --gpu-preference=2 --gpu-preference=high-performance --force-high-performance-gpu --enable-gpu-rasterization --enable-zero-copy --use-gl=angle --use-angle=d3d11 --disable-software-rasterizer" --concurrency=2`;
         
-        console.log(`Executing Remotion CLI render with Subtitles Overlay: ${cmd}`);
-        await execAsync(cmd, { timeout: 180000 });
+        const nvidiaEnv = {
+          ...process.env,
+          CUDA_VISIBLE_DEVICES: '0',
+          SHIM_MCCOMPAT_ID: '1',
+          __NV_PRIME_RENDER_OFFLOAD: '1',
+          __GLX_VENDOR_LIBRARY_NAME: 'nvidia',
+        };
+
+        console.log(`Executing Remotion CLI GPU render on Discrete NVIDIA GPU: ${cmd}`);
+        await execAsync(cmd, { env: nvidiaEnv, timeout: 180000 });
 
         if (fs.existsSync(finalMp4Path) && fs.statSync(finalMp4Path).size > 100000) {
           console.log(`✅ Remotion CLI Render Complete with Subtitles Overlay (${fs.statSync(finalMp4Path).size} bytes)`);
@@ -189,7 +197,7 @@ export class RemotionService {
         server.close();
       }
 
-      // 3. Fallback: FFmpeg Subtitle Burn-In Muxer
+      // 3. Fallback: FFmpeg Subtitle Burn-In Muxer (NVIDIA NVENC GPU Accelerated)
       if (stitchedLocalPath && fs.existsSync(voicePath)) {
         try {
           let filterChain = '';
@@ -200,6 +208,19 @@ export class RemotionService {
           } else if (fs.existsSync(srtPath)) {
             const escapedSrt = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:');
             filterChain = `-vf "subtitles='${escapedSrt}':force_style='Fontname=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=2,Alignment=2,MarginV=120,Bold=1,Italic=1'"`;
+          }
+
+          // Attempt NVIDIA NVENC GPU hardware encoder first
+          try {
+            const nvencMuxCmd = `ffmpeg -y -i "${stitchedLocalPath.replace(/\\/g, '/')}" -i "${voicePath.replace(/\\/g, '/')}" ${filterChain} -c:v h264_nvenc -gpu 0 -preset p4 -pix_fmt yuv420p -c:a aac -shortest "${finalMp4Path.replace(/\\/g, '/')}"`;
+            await execAsync(nvencMuxCmd, { timeout: 60000 });
+
+            if (fs.existsSync(finalMp4Path) && fs.statSync(finalMp4Path).size > 100000) {
+              console.log(`✅ NVIDIA NVENC GPU FFmpeg Subtitle Burn-In Succeeded (${fs.statSync(finalMp4Path).size} bytes)`);
+              return { success: true, retryable: false, data: finalMp4Path };
+            }
+          } catch (nvencMuxErr: any) {
+            console.warn('NVENC FFmpeg subtitle muxing fallback to libx264:', nvencMuxErr.message);
           }
 
           const muxCmd = `ffmpeg -y -i "${stitchedLocalPath.replace(/\\/g, '/')}" -i "${voicePath.replace(/\\/g, '/')}" ${filterChain} -c:v libx264 -preset ultrafast -c:a aac -shortest "${finalMp4Path.replace(/\\/g, '/')}"`;

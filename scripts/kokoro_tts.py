@@ -46,12 +46,12 @@ def main():
         print(f"Error: Missing Kokoro models at {model_path}")
         sys.exit(1)
 
-    print(f"Synthesizing Kokoro TTS audio (Voice: {voice_name})...")
-    kokoro = Kokoro(model_path, voices_path)
-    
-    # Select language based on voice prefix
+    tts_speed = float(sys.argv[4]) if len(sys.argv) >= 5 else float(os.environ.get("TTS_SPEED", "1"))
     lang = "en-gb" if voice_name.startswith("b") else "en-us"
-    samples, sample_rate = kokoro.create(text, voice=voice_name, speed=1.0, lang=lang)
+
+    print(f"Synthesizing Kokoro TTS audio (Voice: {voice_name}, Speed: {tts_speed}x)...")
+    kokoro = Kokoro(model_path, voices_path)
+    samples, sample_rate = kokoro.create(text, voice=voice_name, speed=tts_speed, lang=lang)
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     sf.write(output_path, samples, sample_rate)

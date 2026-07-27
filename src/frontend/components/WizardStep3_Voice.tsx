@@ -24,6 +24,8 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
   const [elevenLabsApiKey, setElevenLabsApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
 
+  const [ttsSpeed, setTtsSpeed] = useState<number>(1.15);
+
   // Fetch saved settings on mount to pre-fill API keys & default voice
   useEffect(() => {
     fetch('/api/settings')
@@ -41,7 +43,7 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ elevenLabsApiKey, ttsProvider: provider }),
+        body: JSON.stringify({ elevenLabsApiKey, ttsProvider: provider, kokoroVoice }),
       });
       if (res.ok) {
         setKeySaved(true);
@@ -73,6 +75,7 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
           voiceName: selectedVoice,
           provider,
           elevenLabsApiKey,
+          ttsSpeed,
         }),
       });
       const data = await res.json();
@@ -90,10 +93,18 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
   };
 
   const KOKORO_VOICES = [
+    { value: 'am_adam', label: '🎙️ Adam (Male Deep - High Energy)' },
     { value: 'am_michael', label: '🎙️ Michael (Male News Anchor - Default)' },
-    { value: 'am_adam', label: '🎙️ Adam (Male Deep)' },
-    { value: 'af_bella', label: '🎙️ Bella (Female Professional)' },
-    { value: 'bm_george', label: '🎙️ George (British Male)' },
+    { value: 'am_echo', label: '🎙️ Echo (Male Smooth & Crisp)' },
+    { value: 'am_eric', label: '🎙️ Eric (Male Energetic)' },
+    { value: 'am_fenrir', label: '🎙️ Fenrir (Male Intense Deep)' },
+    { value: 'am_liam', label: '🎙️ Liam (Male Friendly & Warm)' },
+    { value: 'am_onyx', label: '🎙️ Onyx (Male Deep Resonant)' },
+    { value: 'bm_george', label: '🎙️ George (British Male Financial)' },
+    { value: 'bm_daniel', label: '🎙️ Daniel (British Male Deep)' },
+    { value: 'af_bella', label: '🎙️ Bella (Female Dynamic)' },
+    { value: 'af_nicole', label: '🎙️ Nicole (Female Professional)' },
+    { value: 'bf_emma', label: '🎙️ Emma (British Female Storyteller)' },
   ];
 
   const ELEVENLABS_VOICES = [
@@ -198,19 +209,50 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
 
         {/* Dynamic Options depending on Provider */}
         {provider === 'kokoro' ? (
-          <div>
-            <label className="block text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">
-              Kokoro Voice Profile
-            </label>
-            <select
-              value={kokoroVoice}
-              onChange={(e) => setKokoroVoice(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500"
-            >
-              {KOKORO_VOICES.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="sm:col-span-2">
+              <label className="block text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">
+                Kokoro Voice Profile
+              </label>
+              <select
+                value={kokoroVoice}
+                onChange={(e) => setKokoroVoice(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-cyan-500 font-medium"
+              >
+                {KOKORO_VOICES.map((opt) => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                  Speaking Speed
+                </label>
+                <span className="text-xs font-mono font-bold text-cyan-400">{ttsSpeed.toFixed(2)}x</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="0.80"
+                  max="1.50"
+                  step="0.05"
+                  value={ttsSpeed}
+                  onChange={(e) => setTtsSpeed(parseFloat(e.target.value))}
+                  className="w-full accent-cyan-400 cursor-pointer"
+                />
+                <input
+                  type="number"
+                  min="0.80"
+                  max="1.50"
+                  step="0.05"
+                  value={ttsSpeed}
+                  onChange={(e) => setTtsSpeed(parseFloat(e.target.value) || 1.15)}
+                  className="w-16 bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-center font-mono text-cyan-300 font-bold focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+            </div>
           </div>
         ) : (
           <div className="space-y-4">

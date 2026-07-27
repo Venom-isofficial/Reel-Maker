@@ -1,23 +1,30 @@
 import React, { useState, useEffect } from 'react';
 import { ScriptOutput, MasterPlan, SceneItem } from '../../backend/types';
-import { Clapperboard, Loader2, ArrowRight, ArrowLeft, Plus, Trash2, Edit3 } from 'lucide-react';
+import { Clapperboard, Loader2, ArrowRight, ArrowLeft, Plus, Trash2, Edit3, RefreshCw } from 'lucide-react';
 
 interface Props {
   script: ScriptOutput;
   runId: string;
+  existingMasterPlan?: MasterPlan | null;
   onComplete: (data: { masterPlan: MasterPlan }) => void;
   onBack: () => void;
 }
 
-export const WizardStep2_Scenes: React.FC<Props> = ({ script, runId, onComplete, onBack }) => {
+export const WizardStep2_Scenes: React.FC<Props> = ({ script, runId, existingMasterPlan, onComplete, onBack }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [scenes, setScenes] = useState<SceneItem[]>([]);
-  const [totalDuration, setTotalDuration] = useState(35);
+  const [scenes, setScenes] = useState<SceneItem[]>(existingMasterPlan?.scenes || []);
+  const [totalDuration, setTotalDuration] = useState(existingMasterPlan?.totalDuration || 35);
 
   useEffect(() => {
-    generateScenes();
-  }, []);
+    if (!existingMasterPlan || !existingMasterPlan.scenes || existingMasterPlan.scenes.length === 0) {
+      setScenes([]);
+      generateScenes();
+    } else {
+      setScenes(existingMasterPlan.scenes);
+      setTotalDuration(existingMasterPlan.totalDuration || 26);
+    }
+  }, [existingMasterPlan, runId, script?.fullScript]);
 
   const generateScenes = async () => {
     setLoading(true);
@@ -77,7 +84,7 @@ export const WizardStep2_Scenes: React.FC<Props> = ({ script, runId, onComplete,
     onComplete({ masterPlan });
   };
 
-  if (loading) {
+  if (loading && scenes.length === 0) {
     return (
       <div className="glass-panel rounded-2xl p-12 text-center">
         <Loader2 className="w-8 h-8 text-cyan-400 animate-spin mx-auto mb-3" />
@@ -101,12 +108,21 @@ export const WizardStep2_Scenes: React.FC<Props> = ({ script, runId, onComplete,
             <p className="text-xs text-slate-400">{scenes.length} scenes • ~{scenes.reduce((a, s) => a + (s.durationSeconds || 5), 0)}s total</p>
           </div>
         </div>
-        <button
-          onClick={addScene}
-          className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-600/40 flex items-center gap-1.5 transition"
-        >
-          <Plus className="w-3.5 h-3.5" /> Add Scene
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={generateScenes}
+            disabled={loading}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900 border border-slate-700 text-slate-300 hover:bg-slate-800 flex items-center gap-1.5 transition"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} /> Regenerate AI Scenes
+          </button>
+          <button
+            onClick={addScene}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-600/40 flex items-center gap-1.5 transition"
+          >
+            <Plus className="w-3.5 h-3.5" /> Add Scene
+          </button>
+        </div>
       </div>
 
       {/* Scene Cards */}

@@ -67,9 +67,15 @@ export default function App() {
 
       {/* Main Content Body */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'wizard' && <WizardView />}
-        {activeTab === 'prompts' && <PromptManager />}
-        {activeTab === 'settings' && <SettingsPage />}
+        <div className={activeTab === 'wizard' ? 'block' : 'hidden'}>
+          <WizardView />
+        </div>
+        <div className={activeTab === 'prompts' ? 'block' : 'hidden'}>
+          <PromptManager />
+        </div>
+        <div className={activeTab === 'settings' ? 'block' : 'hidden'}>
+          <SettingsPage />
+        </div>
       </main>
     </div>
   );

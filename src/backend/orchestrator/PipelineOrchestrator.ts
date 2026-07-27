@@ -146,7 +146,8 @@ export class PipelineOrchestrator {
     runId: string,
     voiceName?: string,
     provider?: string,
-    elevenLabsApiKey?: string
+    elevenLabsApiKey?: string,
+    ttsSpeed?: number
   ): Promise<{ audioUrl: string; duration: number }> {
     if (this.activeVoiceGenerations.has(runId)) {
       this.logger.info(`🎙️ Joining already active voice generation task for ${runId}`);
@@ -159,21 +160,21 @@ export class PipelineOrchestrator {
         this.logger.info(`🎙️ Wizard Step 3: Generating voice audio (${provider || 'kokoro'}) for ${runId}`);
 
         const voiceMp3Path = this.storageService.getFilePath(runDir, 'voice.mp3');
-        const voiceRes = await this.voiceService.generateVoice(scriptText, voiceMp3Path, voiceName, provider, elevenLabsApiKey);
+        const voiceRes = await this.voiceService.generateVoice(scriptText, voiceMp3Path, voiceName, provider, elevenLabsApiKey, ttsSpeed);
         if (!voiceRes.success) throw new Error(voiceRes.errorMessage || 'Voice generation failed');
 
         const voiceSize = fs.existsSync(voiceMp3Path) ? fs.statSync(voiceMp3Path).size : 0;
         const duration = voiceRes.data?.duration || 20;
         this.logger.info(`Voice generated: ${voiceSize} bytes, ~${duration}s`);
 
-        // Recalibrate master.json scene durations to match exact audio narration length + 2s buffer padding
+        // Recalibrate master.json scene durations to match exact audio narration length + 0.8s buffer padding (capped at 29.5s max)
         const masterPath = this.storageService.getFilePath(runDir, 'master.json');
         if (fs.existsSync(masterPath)) {
           try {
             const masterData = JSON.parse(fs.readFileSync(masterPath, 'utf-8'));
             if (masterData && Array.isArray(masterData.scenes) && masterData.scenes.length > 0) {
               const plannedSum = masterData.scenes.reduce((acc: number, s: any) => acc + (s.durationSeconds || 5), 0);
-              const targetVideoDur = Math.ceil(duration + 2.0);
+              const targetVideoDur = Math.min(29.5, Math.ceil(duration + 0.8));
               if (plannedSum < targetVideoDur) {
                 const extraSec = targetVideoDur - plannedSum;
                 const lastIdx = masterData.scenes.length - 1;

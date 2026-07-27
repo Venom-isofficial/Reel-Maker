@@ -36,6 +36,21 @@ export class VoiceService {
     return 0;
   }
 
+  private async applySpeedFilter(filePath: string, speedMultiplier: number = 1.15): Promise<void> {
+    if (speedMultiplier <= 1.0) return;
+    try {
+      const tempSpeedPath = filePath.replace('.mp3', '_fast.mp3');
+      const cmd = `ffmpeg -y -i "${filePath.replace(/\\/g, '/')}" -filter:a "atempo=${speedMultiplier}" "${tempSpeedPath.replace(/\\/g, '/')}"`;
+      await execAsync(cmd, { timeout: 15000 });
+      if (fs.existsSync(tempSpeedPath) && fs.statSync(tempSpeedPath).size > 1000) {
+        fs.unlinkSync(filePath);
+        fs.renameSync(tempSpeedPath, filePath);
+      }
+    } catch (e) {
+      console.warn('Audio speed filter note:', e);
+    }
+  }
+
   public async generateVoiceElevenLabs(
     scriptText: string,
     outputMp3Path: string,
@@ -77,9 +92,16 @@ export class VoiceService {
 
       if (response.data) {
         fs.writeFileSync(outputMp3Path, Buffer.from(response.data));
+        
+        // Fast-paced narration speed boost (1.15x) for viral reel energy
+        const speedBoost = parseFloat(process.env.TTS_SPEED || '1.15');
+        if (speedBoost > 1.0) {
+          await this.applySpeedFilter(outputMp3Path, speedBoost);
+        }
+
         const exactDur = await this.getExactAudioDuration(outputMp3Path);
-        const duration = exactDur || Math.max(15, Math.ceil(scriptText.split(' ').length / 2.8));
-        console.log(`✅ ElevenLabs Voice MP3 generated successfully (${fs.statSync(outputMp3Path).size} bytes, duration: ${duration}s)`);
+        const duration = exactDur || Math.max(12, Math.ceil(scriptText.split(' ').length / 3.2));
+        console.log(`✅ ElevenLabs Fast-Paced Voice MP3 generated successfully (${fs.statSync(outputMp3Path).size} bytes, duration: ${duration}s)`);
         return {
           success: true,
           retryable: false,
@@ -106,18 +128,19 @@ export class VoiceService {
     outputMp3Path: string,
     voiceName: string = process.env.KOKORO_VOICE || 'am_michael',
     provider?: string,
-    elevenLabsApiKey?: string
+    elevenLabsApiKey?: string,
+    ttsSpeed?: number
   ): Promise<ServiceResult<{ audioPath: string; duration: number }>> {
     try {
       const dir = path.dirname(outputMp3Path);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
       const ttsEngine = provider || process.env.TTS_PROVIDER || 'kokoro';
+      const speedVal = ttsSpeed || parseFloat(process.env.TTS_SPEED || '1.15');
 
-      // 0. ElevenLabs Cloud AI TTS Engine (if requested or configured)
-      if (ttsEngine === 'elevenlabs' || (elevenLabsApiKey && elevenLabsApiKey.length > 5)) {
-        // Default to Adam voice ID (pNInz6obpgDQGcFmaJgB) if voiceName is a Kokoro name or unconfigured
-        const elVoice = (voiceName && !voiceName.startsWith('am_') && !voiceName.startsWith('af_') && !voiceName.startsWith('bm_'))
+      // 0. ElevenLabs Cloud AI TTS Engine (only if provider is explicitly set to elevenlabs)
+      if (ttsEngine === 'elevenlabs') {
+        const elVoice = (voiceName && !voiceName.startsWith('am_') && !voiceName.startsWith('af_') && !voiceName.startsWith('bm_') && !voiceName.startsWith('bf_'))
           ? voiceName
           : 'pNInz6obpgDQGcFmaJgB';
         const elRes = await this.generateVoiceElevenLabs(scriptText, outputMp3Path, elVoice, elevenLabsApiKey);
@@ -129,12 +152,12 @@ export class VoiceService {
       try {
         const pythonScript = path.resolve(process.cwd(), 'scripts/kokoro_tts.py');
         if (fs.existsSync(pythonScript)) {
-          console.log(`Generating studio voice audio via Kokoro Local TTS (voice: ${voiceName})...`);
+          console.log(`Generating studio voice audio via Kokoro Local TTS (voice: ${voiceName}, speed: ${speedVal}x)...`);
 
           const tempTxtPath = path.join(dir, 'script_prompt.txt');
           fs.writeFileSync(tempTxtPath, scriptText, 'utf-8');
 
-          const cmd = `python "${pythonScript.replace(/\\/g, '/')}" "${tempTxtPath.replace(/\\/g, '/')}" "${outputMp3Path.replace(/\\/g, '/')}" "${voiceName}"`;
+          const cmd = `python "${pythonScript.replace(/\\/g, '/')}" "${tempTxtPath.replace(/\\/g, '/')}" "${outputMp3Path.replace(/\\/g, '/')}" "${voiceName}" "${speedVal}"`;
           await execAsync(cmd, { timeout: 60000 });
 
           if (fs.existsSync(outputMp3Path) && fs.statSync(outputMp3Path).size > 1000) {

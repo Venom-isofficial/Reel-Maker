@@ -109,7 +109,15 @@ export const WizardView: React.FC = () => {
       {/* Step Content */}
       {currentStep === 1 && (
         <WizardStep1_Script
+          initialScript={script}
+          initialArticle={article}
+          initialAnalysis={analysis}
+          initialRunId={runId}
           onComplete={(data) => {
+            // If the script text or runId changed, invalidate downstream scene plan
+            if (!script || script.fullScript !== data.script.fullScript || runId !== data.runId) {
+              setMasterPlan(null);
+            }
             setRunId(data.runId);
             setArticle(data.article);
             setAnalysis(data.analysis);
@@ -123,6 +131,7 @@ export const WizardView: React.FC = () => {
         <WizardStep2_Scenes
           script={script}
           runId={runId}
+          existingMasterPlan={masterPlan}
           onComplete={(data) => {
             setMasterPlan(data.masterPlan);
             setCurrentStep(3);
