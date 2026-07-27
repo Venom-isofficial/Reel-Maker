@@ -35,7 +35,7 @@ export class RemotionService {
 
       console.log(`Stitching ${clipFiles.length} scene clips with FFmpeg into stitched_video.mp4...`);
       try {
-        const nvencCmd = `ffmpeg -y -f concat -safe 0 -i "${concatListPath.replace(/\\/g, '/')}" -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,tpad=stop_mode=clone:stop_duration=4" -c:v h264_nvenc -preset p4 -pix_fmt yuv420p -an "${stitchedPath.replace(/\\/g, '/')}"`;
+        const nvencCmd = `ffmpeg -y -f concat -safe 0 -i "${concatListPath.replace(/\\/g, '/')}" -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,tpad=stop_mode=clone:stop_duration=15" -c:v h264_nvenc -preset p4 -pix_fmt yuv420p -an "${stitchedPath.replace(/\\/g, '/')}"`;
         await execAsync(nvencCmd, { timeout: 45000 });
         if (fs.existsSync(stitchedPath) && fs.statSync(stitchedPath).size > 100000) {
           console.log(`✅ NVIDIA NVENC FFmpeg Video Stitching Complete with Frame Padding: (${fs.statSync(stitchedPath).size} bytes)`);
@@ -45,7 +45,7 @@ export class RemotionService {
         console.warn('NVENC FFmpeg scene stitching fallback to libx264:', nvencErr.message);
       }
 
-      const cmd = `ffmpeg -y -f concat -safe 0 -i "${concatListPath.replace(/\\/g, '/')}" -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,tpad=stop_mode=clone:stop_duration=4" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -an "${stitchedPath.replace(/\\/g, '/')}"`;
+      const cmd = `ffmpeg -y -f concat -safe 0 -i "${concatListPath.replace(/\\/g, '/')}" -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30,tpad=stop_mode=clone:stop_duration=15" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -an "${stitchedPath.replace(/\\/g, '/')}"`;
       await execAsync(cmd, { timeout: 45000 });
 
       if (fs.existsSync(stitchedPath) && fs.statSync(stitchedPath).size > 100000) {

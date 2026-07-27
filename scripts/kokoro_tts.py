@@ -46,7 +46,7 @@ def main():
         print(f"Error: Missing Kokoro models at {model_path}")
         sys.exit(1)
 
-    tts_speed = float(sys.argv[4]) if len(sys.argv) >= 5 else float(os.environ.get("TTS_SPEED", "1"))
+    tts_speed = float(sys.argv[4]) if len(sys.argv) >= 5 else float(os.environ.get("TTS_SPEED", "1.15"))
     lang = "en-gb" if voice_name.startswith("b") else "en-us"
 
     print(f"Synthesizing Kokoro TTS audio (Voice: {voice_name}, Speed: {tts_speed}x)...")

@@ -19,9 +19,11 @@ export const Root: React.FC = () => {
           const scenes: any[] = (props && Array.isArray(props.scenes)) ? props.scenes : [];
           const scenesTotal = scenes.reduce((acc: number, s: any) => acc + (s.durationSeconds || 5), 0);
 
-          // Calculate exact video duration in seconds (capped strictly under 30s)
-          const rawDuration = Math.max(lastWordEnd + 0.8, scenesTotal + 0.5, 24);
-          const durationSeconds = Math.min(29.5, rawDuration);
+          // Video duration is driven strictly by voice narration completion (+0.5s margin).
+          // 1. If video clips are longer than voice: video ends immediately when voice narration finishes.
+          // 2. If voice is longer than video clips: video holds its last frame until voice finishes in full.
+          const voiceEndDuration = lastWordEnd > 0 ? (lastWordEnd + 0.5) : (scenesTotal > 0 ? scenesTotal : 20);
+          const durationSeconds = Math.max(3, voiceEndDuration);
           return {
             durationInFrames: Math.ceil(durationSeconds * 30),
           };
