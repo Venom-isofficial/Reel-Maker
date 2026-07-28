@@ -79,14 +79,14 @@ export const CaptionsOverlay: React.FC<{ words: CaptionWord[] }> = ({ words = []
     <div
       style={{
         position: 'absolute',
-        bottom: '220px',
+        bottom: '760px',
         left: '5%',
         right: '5%',
         display: 'flex',
         flexWrap: 'wrap',
         justifyContent: 'center',
         alignItems: 'center',
-        gap: '10px 18px',
+        gap: '6px 12px',
         padding: '0 20px',
         textAlign: 'center',
         zIndex: 100,
@@ -101,19 +101,19 @@ export const CaptionsOverlay: React.FC<{ words: CaptionWord[] }> = ({ words = []
           <span
             key={idx}
             style={{
-              fontFamily: `${bangersFont}, ${montserratFont}, 'Impact', 'Arial Black', sans-serif`,
-              fontStyle: 'italic',
-              fontSize: '58px',
-              lineHeight: '1.15',
+              fontFamily: `${montserratFont}, sans-serif`,
+              fontStyle: 'normal',
+              fontSize: '34px',
+              lineHeight: '1.2',
               fontWeight: '900',
               textTransform: 'uppercase',
-              letterSpacing: '2px',
-              color: isHighlighted ? '#FACC15' : '#FFFFFF',
-              WebkitTextStroke: '3.5px #000000',
+              letterSpacing: '0.8px',
+              color: isHighlighted ? '#EAB308' : '#FFFFFF',
+              WebkitTextStroke: '2px #000000',
               paintOrder: 'stroke fill',
               textShadow: isHighlighted
-                ? '3px 3px 0 #000, -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 0 0 20px rgba(250, 204, 21, 0.8), 0 6px 12px rgba(0, 0, 0, 0.95)'
-                : '3px 3px 0 #000, -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000, 0 6px 12px rgba(0, 0, 0, 0.95)',
+                ? '1.5px 1.5px 0 #000, -1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 0 0 10px rgba(234, 179, 8, 0.5), 0 3px 6px rgba(0, 0, 0, 0.9)'
+                : '1.5px 1.5px 0 #000, -1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 0 3px 6px rgba(0, 0, 0, 0.9)',
               display: 'inline-block',
             }}
           >
