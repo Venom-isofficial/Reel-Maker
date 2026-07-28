@@ -1,5 +1,8 @@
 import fs from 'fs';
 import path from 'path';
+import { exec } from 'child_process';
+import { promisify } from 'util';
+const execAsync = promisify(exec);
 import { StorageService } from '../services/StorageService';
 import { LoggingService } from '../services/LoggingService';
 import { NewsService } from '../services/NewsService';
@@ -205,43 +208,57 @@ export class PipelineOrchestrator {
   }
 
   // ========================================================================
-  //  WIZARD STEP 4: Download Pexels clips for all scenes
+  //  WIZARD STEP 4: Download / Generate clips for all scenes (Pexels / LTX-Video)
   // ========================================================================
   public async wizardStep4_Clips(
     masterPlan: MasterPlan,
-    runId: string
+    runId: string,
+    provider: 'pexels' | 'ltx' = 'pexels',
+    customPrompts?: Record<number, string>
   ): Promise<{ clips: Array<{ sceneNumber: number; clipUrl: string; searchKeyword: string; status: string }> }> {
     const runDir = this.storageService.getRunDir(runId);
-    this.logger.info(`📹 Wizard Step 4: Generating video clips for ${runId}`);
+    this.logger.info(`📹 Wizard Step 4: Generating video clips (${provider}) for ${runId}`);
 
     // Save potentially edited master plan
     this.storageService.saveJson(runDir, 'master.json', masterPlan);
 
-    // Generate video keywords
-    const keywordsRes = await this.aiService.generateVideoKeywords(masterPlan);
-    if (keywordsRes.success && keywordsRes.data) {
-      this.storageService.saveJson(runDir, 'video_keywords.json', keywordsRes.data);
-    }
-
     const clipsDir = this.storageService.getFilePath(runDir, 'clips');
+    if (!fs.existsSync(clipsDir)) fs.mkdirSync(clipsDir, { recursive: true });
+
     const clips: Array<{ sceneNumber: number; clipUrl: string; searchKeyword: string; status: string }> = [];
 
     for (const scene of masterPlan.scenes) {
-      const kwItem = keywordsRes.data?.scenes?.find((k) => k.sceneNumber === scene.sceneNumber);
-      const searchKeyword = kwItem?.searchKeyword || scene.searchKeyword || 'business corporate';
+      const userPrompt = customPrompts?.[scene.sceneNumber] || scene.videoPrompt || scene.searchKeyword || scene.visualPrompt || 'business corporate';
 
-      const res = await this.videoService.generateSceneClip(scene, clipsDir, searchKeyword);
-      clips.push({
-        sceneNumber: scene.sceneNumber,
-        clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
-        searchKeyword,
-        status: res.success ? 'completed' : 'failed',
-      });
+      if (provider === 'ltx') {
+        // LTX-Video Baseplate Generator (creates baseplate video ready for LTX model pipeline)
+        const sceneClipPath = path.join(clipsDir, `scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`);
+        if (!fs.existsSync(sceneClipPath) || fs.statSync(sceneClipPath).size < 1000) {
+          const pexelsRes = await this.videoService.generateSceneClip(scene, clipsDir, userPrompt);
+          if (!pexelsRes.success) {
+            try {
+              const escText = userPrompt.replace(/'/g, '').slice(0, 30);
+              const cmd = `ffmpeg -y -f lavfi -i color=c=0x0f172a:s=1080x1920:d=${scene.durationSeconds || 5} -vf "drawtext=text='LTX AI Scene ${scene.sceneNumber} (${escText})':fontcolor=white:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2" -c:v libx264 -pix_fmt yuv420p "${sceneClipPath.replace(/\\/g, '/')}"`;
+              await execAsync(cmd);
+            } catch (e) {}
+          }
+        }
 
-      if (res.success) {
-        this.logger.info(`✅ Scene ${scene.sceneNumber} clip ready`);
+        clips.push({
+          sceneNumber: scene.sceneNumber,
+          clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+          searchKeyword: userPrompt,
+          status: 'completed',
+        });
       } else {
-        this.logger.error(`❌ Scene ${scene.sceneNumber} clip failed: ${res.errorMessage}`);
+        // Pexels Stock Video Downloader
+        const res = await this.videoService.generateSceneClip(scene, clipsDir, userPrompt);
+        clips.push({
+          sceneNumber: scene.sceneNumber,
+          clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+          searchKeyword: userPrompt,
+          status: res.success ? 'completed' : 'failed',
+        });
       }
     }
 

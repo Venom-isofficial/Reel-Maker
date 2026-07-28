@@ -97,9 +97,9 @@ app.post('/api/wizard/step3-voice', async (req, res) => {
 // Step 4: Generate all clips
 app.post('/api/wizard/step4-clips', async (req, res) => {
   try {
-    const { masterPlan, runId } = req.body;
+    const { masterPlan, runId, provider, prompts } = req.body;
     if (!masterPlan || !runId) return res.status(400).json({ success: false, message: 'masterPlan and runId required' });
-    const result = await orchestrator.wizardStep4_Clips(masterPlan, runId);
+    const result = await orchestrator.wizardStep4_Clips(masterPlan, runId, provider || 'pexels', prompts);
     res.json({ success: true, ...result });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });

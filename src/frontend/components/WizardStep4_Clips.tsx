@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { MasterPlan } from '../../backend/types';
-import { Video, Loader2, ArrowRight, ArrowLeft, RefreshCw, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Video, Sparkles, Loader2, ArrowRight, ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, Film, Play, Layers } from 'lucide-react';
 
 interface ClipItem {
   sceneNumber: number;
@@ -17,19 +17,40 @@ interface Props {
 }
 
 export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComplete, onBack }) => {
+  const [provider, setProvider] = useState<'pexels' | 'ltx'>('pexels');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [clips, setClips] = useState<ClipItem[]>([]);
   const [regenLoading, setRegenLoading] = useState<Record<number, boolean>>({});
-  const [editedKeywords, setEditedKeywords] = useState<Record<number, string>>({});
-  const hasFiredRef = useRef(false);
+  const [prompts, setPrompts] = useState<Record<number, string>>({});
 
+  // Initialize scene prompts on mount
   useEffect(() => {
-    if (!hasFiredRef.current) {
-      hasFiredRef.current = true;
-      generateClips();
-    }
-  }, []);
+    const initialPrompts: Record<number, string> = {};
+    const initialClips: ClipItem[] = [];
+
+    (masterPlan.scenes || []).forEach((scene) => {
+      initialPrompts[scene.sceneNumber] = scene.visualPrompt || scene.searchKeyword || 'business corporate technology';
+      initialClips.push({
+        sceneNumber: scene.sceneNumber,
+        clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+        searchKeyword: scene.searchKeyword || 'business corporate',
+        status: 'pending',
+      });
+    });
+
+    setPrompts(initialPrompts);
+    setClips(initialClips);
+
+    // Check if clips already exist on disk
+    fetch(`/api/runs/${runId}/file/clips/scene_01.mp4`, { method: 'HEAD' })
+      .then((r) => {
+        if (r.ok) {
+          setClips((prev) => prev.map((c) => ({ ...c, status: 'completed' })));
+        }
+      })
+      .catch(() => {});
+  }, [masterPlan, runId]);
 
   const generateClips = async () => {
     setLoading(true);
@@ -38,23 +59,24 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
       const res = await fetch('/api/wizard/step4-clips', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ masterPlan, runId }),
+        body: JSON.stringify({
+          masterPlan,
+          runId,
+          provider,
+          prompts,
+        }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.message || 'Clip generation failed');
       setClips(data.clips);
-      // Initialize keyword editors
-      const kws: Record<number, string> = {};
-      data.clips.forEach((c: ClipItem) => { kws[c.sceneNumber] = c.searchKeyword; });
-      setEditedKeywords(kws);
     } catch (err: any) {
-      setError(err.message);
+      setError(err.message || 'Failed to generate video clips');
     } finally {
       setLoading(false);
     }
   };
 
-  const regenClip = async (sceneNumber: number) => {
+  const regenSingleClip = async (sceneNumber: number) => {
     setRegenLoading((prev) => ({ ...prev, [sceneNumber]: true }));
     try {
       const scene = masterPlan.scenes.find((s) => s.sceneNumber === sceneNumber);
@@ -63,7 +85,7 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           sceneNumber,
-          searchKeyword: editedKeywords[sceneNumber] || 'business',
+          searchKeyword: prompts[sceneNumber] || 'business',
           durationSeconds: scene?.durationSeconds || 5,
           runId,
         }),
@@ -73,7 +95,7 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
         setClips((prev) =>
           prev.map((c) =>
             c.sceneNumber === sceneNumber
-              ? { ...c, clipUrl: data.clipUrl, searchKeyword: editedKeywords[sceneNumber], status: data.status }
+              ? { ...c, clipUrl: data.clipUrl, searchKeyword: prompts[sceneNumber], status: data.status }
               : c
           )
         );
@@ -85,46 +107,118 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
     }
   };
 
-  if (loading) {
-    return (
-      <div className="glass-panel rounded-2xl p-12 text-center">
-        <Loader2 className="w-8 h-8 text-cyan-400 animate-spin mx-auto mb-3" />
-        <p className="text-sm text-slate-300">Downloading Pexels video clips...</p>
-        <p className="text-xs text-slate-500 mt-1">This may take 30-60 seconds</p>
-      </div>
-    );
-  }
+  const readyCount = clips.filter((c) => c.status === 'completed').length;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {error && (
-        <div className="bg-rose-950/40 border border-rose-800/50 rounded-xl px-4 py-3 text-rose-300 text-xs">{error}</div>
+        <div className="bg-rose-950/40 border border-rose-800/50 rounded-xl px-4 py-3 text-rose-300 text-xs flex items-center justify-between">
+          <span>{error}</span>
+          <button onClick={() => setError(null)} className="text-rose-400 font-bold hover:text-white">✕</button>
+        </div>
       )}
 
-      {/* Header */}
-      <div className="glass-panel rounded-2xl p-5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Video className="w-5 h-5 text-cyan-400" />
-          <div>
-            <h2 className="text-lg font-bold text-white">Video Clips Review</h2>
-            <p className="text-xs text-slate-400">
-              {clips.filter((c) => c.status === 'completed').length}/{clips.length} clips ready • Play, review, and regenerate any clip
-            </p>
-          </div>
+      {/* Provider Selector Switch */}
+      <div className="space-y-3">
+        <label className="block text-xs text-slate-400 font-semibold uppercase tracking-wider">
+          Select Video Generation Engine
+        </label>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Pexels Provider Option */}
+          <button
+            type="button"
+            onClick={() => setProvider('pexels')}
+            className={`p-4 rounded-xl border text-left transition ${
+              provider === 'pexels'
+                ? 'bg-cyan-950/40 border-cyan-500 text-white shadow-lg shadow-cyan-500/10'
+                : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-sm font-bold flex items-center gap-2">
+                <Video className="w-4 h-4 text-cyan-400" /> Pexels Stock Video
+              </span>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-cyan-950 border border-cyan-700 text-cyan-400">
+                Stock API
+              </span>
+            </div>
+            <p className="text-xs text-slate-400">Fetch 1080x1920 HD vertical stock video footage automatically via Pexels keywords.</p>
+          </button>
+
+          {/* LTX-Video AI Provider Option */}
+          <button
+            type="button"
+            onClick={() => setProvider('ltx')}
+            className={`p-4 rounded-xl border text-left transition ${
+              provider === 'ltx'
+                ? 'bg-purple-950/40 border-purple-500 text-white shadow-lg shadow-purple-500/10'
+                : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+            }`}
+          >
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-sm font-bold flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-purple-400" /> LTX-Video AI Generation
+              </span>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-purple-950 border border-purple-700 text-purple-300">
+                Local AI
+              </span>
+            </div>
+            <p className="text-xs text-slate-400">Synthesize custom neural video clips per scene based on detailed AI visual prompts.</p>
+          </button>
         </div>
       </div>
 
-      {/* Clips Grid */}
+      {/* Top Action Header Bar */}
+      <div className="glass-panel rounded-2xl p-5 flex flex-col md:flex-row items-center justify-between gap-4 border border-slate-800">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-cyan-400">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-base font-bold text-white">Scene Video Prompts & Wireframe</h2>
+            <p className="text-xs text-slate-400">
+              {readyCount}/{masterPlan.scenes?.length || 0} clips ready • Engine: <span className="text-cyan-300 font-semibold">{provider === 'ltx' ? 'LTX-Video AI Baseplate' : 'Pexels Stock Downloader'}</span>
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={generateClips}
+          disabled={loading}
+          className={`glow-button px-7 py-3 rounded-xl text-xs font-bold text-white flex items-center justify-center gap-2 shadow-lg transition-all ${
+            loading ? 'opacity-75 cursor-wait' : ''
+          }`}
+        >
+          {loading ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin text-cyan-300" />
+              Generating Scene Clips...
+            </>
+          ) : (
+            <>
+              <Sparkles className="w-4 h-4 text-amber-300" />
+              Generate Video Clips ({provider === 'ltx' ? 'LTX-Video' : 'Pexels'})
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Scene Wireframe Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        {clips.map((clip) => {
-          const scene = masterPlan.scenes.find((s) => s.sceneNumber === clip.sceneNumber);
-          const isRegen = regenLoading[clip.sceneNumber];
+        {(masterPlan.scenes || []).map((scene) => {
+          const clip = clips.find((c) => c.sceneNumber === scene.sceneNumber) || {
+            sceneNumber: scene.sceneNumber,
+            clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+            searchKeyword: scene.searchKeyword || '',
+            status: 'pending',
+          };
+          const isRegen = regenLoading[scene.sceneNumber];
 
           return (
-            <div key={clip.sceneNumber} className="glass-card rounded-xl overflow-hidden border border-slate-800">
-              {/* Video Player */}
-              <div className="aspect-[9/12] bg-black relative">
-                {clip.status === 'completed' ? (
+            <div key={scene.sceneNumber} className="glass-card rounded-2xl overflow-hidden border border-slate-800 flex flex-col transition hover:border-slate-700">
+              {/* Wireframe Preview Frame */}
+              <div className="aspect-[9/13] bg-slate-950 relative flex flex-col items-center justify-center border-b border-slate-800/80 overflow-hidden">
+                {clip.status === 'completed' && clip.clipUrl ? (
                   <video
                     controls
                     className="w-full h-full object-cover"
@@ -133,45 +227,76 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
                     <source src={clip.clipUrl} type="video/mp4" />
                   </video>
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center text-slate-500">
-                    <AlertTriangle className="w-6 h-6" />
+                  /* Wireframe Placeholder Baseplate */
+                  <div className="p-6 text-center space-y-3">
+                    <div className={`w-14 h-14 rounded-2xl border flex items-center justify-center mx-auto transition-transform ${
+                      provider === 'ltx' ? 'bg-purple-950/40 border-purple-800/60 text-purple-400' : 'bg-cyan-950/40 border-cyan-800/60 text-cyan-400'
+                    }`}>
+                      {provider === 'ltx' ? <Sparkles className="w-7 h-7" /> : <Film className="w-7 h-7" />}
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-200 uppercase tracking-wide">
+                        {provider === 'ltx' ? 'LTX AI Wireframe Frame' : 'Pexels Video Preview'}
+                      </p>
+                      <p className="text-[11px] text-slate-500 mt-1 font-mono">
+                        Prompt Ready • Click Generate
+                      </p>
+                    </div>
                   </div>
                 )}
-                <div className="absolute top-2 left-2 bg-black/70 backdrop-blur px-2 py-1 rounded-lg">
-                  <span className="text-[10px] font-bold font-mono text-cyan-400">
-                    SCENE {String(clip.sceneNumber).padStart(2, '0')}
+
+                {/* Top Badge: Scene Number */}
+                <div className="absolute top-3 left-3 bg-black/80 backdrop-blur px-2.5 py-1 rounded-lg border border-slate-800">
+                  <span className="text-[11px] font-bold font-mono text-cyan-400">
+                    SCENE {String(scene.sceneNumber).padStart(2, '0')}
                   </span>
                 </div>
-                <div className="absolute top-2 right-2">
+
+                {/* Top Badge: Duration & Status */}
+                <div className="absolute top-3 right-3 flex items-center gap-1.5">
+                  <span className="bg-black/80 backdrop-blur px-2 py-1 rounded-lg border border-slate-800 text-[10px] font-mono text-slate-300">
+                    {scene.durationSeconds || 5}s
+                  </span>
                   {clip.status === 'completed' ? (
-                    <CheckCircle className="w-4 h-4 text-emerald-400" />
+                    <div className="bg-emerald-950/80 border border-emerald-800/80 p-1 rounded-lg text-emerald-400">
+                      <CheckCircle className="w-3.5 h-3.5" />
+                    </div>
                   ) : (
-                    <AlertTriangle className="w-4 h-4 text-rose-400" />
+                    <div className="bg-amber-950/80 border border-amber-800/80 p-1 rounded-lg text-amber-400">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                    </div>
                   )}
                 </div>
               </div>
 
-              {/* Controls */}
-              <div className="p-3 space-y-2">
-                <p className="text-[10px] text-slate-400 line-clamp-1 italic">
-                  "{scene?.narrationText || ''}"
-                </p>
-                <div>
-                  <label className="block text-[10px] text-slate-500 uppercase font-semibold mb-0.5">Search Keyword</label>
-                  <input
-                    type="text"
-                    value={editedKeywords[clip.sceneNumber] || ''}
-                    onChange={(e) => setEditedKeywords((prev) => ({ ...prev, [clip.sceneNumber]: e.target.value }))}
-                    className="w-full bg-slate-950/80 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+              {/* Editable Prompt & Actions */}
+              <div className="p-4 space-y-3.5 flex-1 flex flex-col justify-between bg-slate-900/30">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                      {provider === 'ltx' ? 'LTX AI Video Prompt' : 'Pexels Search Query'}
+                    </label>
+                    <span className="text-[10px] text-slate-500 italic line-clamp-1 max-w-[140px]">
+                      "{scene.narrationText?.slice(0, 20)}..."
+                    </span>
+                  </div>
+
+                  <textarea
+                    rows={3}
+                    value={prompts[scene.sceneNumber] || ''}
+                    onChange={(e) => setPrompts((prev) => ({ ...prev, [scene.sceneNumber]: e.target.value }))}
+                    placeholder={provider === 'ltx' ? 'Describe the visual AI video scene...' : 'Enter Pexels search keywords...'}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 resize-none font-sans leading-relaxed"
                   />
                 </div>
+
                 <button
-                  onClick={() => regenClip(clip.sceneNumber)}
+                  onClick={() => regenSingleClip(scene.sceneNumber)}
                   disabled={isRegen}
-                  className="w-full px-3 py-2 rounded-lg text-xs font-semibold bg-amber-600/20 text-amber-300 border border-amber-500/40 hover:bg-amber-600/30 flex items-center justify-center gap-1.5 transition"
+                  className="w-full py-2 rounded-xl text-xs font-semibold bg-slate-950 border border-slate-800 hover:border-slate-700 text-slate-300 flex items-center justify-center gap-1.5 transition"
                 >
                   <RefreshCw className={`w-3.5 h-3.5 ${isRegen ? 'animate-spin' : ''}`} />
-                  {isRegen ? 'Regenerating...' : 'Regenerate Clip'}
+                  {isRegen ? 'Generating Scene...' : `Regenerate Scene ${scene.sceneNumber}`}
                 </button>
               </div>
             </div>
@@ -179,8 +304,8 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
         })}
       </div>
 
-      {/* Navigation */}
-      <div className="flex items-center justify-between pt-2">
+      {/* Footer Navigation Bar */}
+      <div className="flex items-center justify-between pt-3 border-t border-slate-800/80">
         <button
           onClick={onBack}
           className="px-5 py-2.5 rounded-xl text-xs font-semibold text-slate-400 border border-slate-800 hover:bg-slate-900/50 flex items-center gap-2 transition"
@@ -190,7 +315,7 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
         <button
           onClick={() => onComplete({ clips })}
           disabled={clips.length === 0}
-          className={`glow-button px-7 py-3.5 rounded-2xl text-sm font-bold text-white flex items-center gap-2.5 ${clips.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={`glow-button px-7 py-3 rounded-2xl text-sm font-bold text-white flex items-center gap-2.5 ${clips.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           Next: Render Final <ArrowRight className="w-4 h-4" />
         </button>

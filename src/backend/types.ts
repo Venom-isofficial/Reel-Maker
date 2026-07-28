@@ -47,6 +47,7 @@ export interface SceneItem {
   narrationText: string;
   subtitleText: string;
   videoPrompt: string;
+  visualPrompt?: string;
   searchKeyword?: string;
   transition: string;
   clipPath?: string;
