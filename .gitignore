@@ -20,7 +20,11 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
-setings.json
+config/settings.json
+config/*.json
+!config/*.example.json
+settings.json
+*.json.secret
 
 # Project Generated Workspace & Renders
 /workspace/
@@ -30,10 +34,11 @@ setings.json
 !/scripts/models/.gitkeep
 
 # Temporary test media files
-test_*.mp4
-test_*.wav
-test_*.json
-test_*.srt
+test_*
+*.mp4
+*.wav
+*.mp3
+*.json.bak
 *.log
 
 # IDE & OS files

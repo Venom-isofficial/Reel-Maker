@@ -19,34 +19,36 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
   // Provider: 'kokoro' | 'chatterbox' | 'elevenlabs'
   const [provider, setProvider] = useState<'kokoro' | 'chatterbox' | 'elevenlabs'>('kokoro');
   const [kokoroVoice, setKokoroVoice] = useState('am_michael');
-  const [chatterboxVoice, setChatterboxVoice] = useState('en-US-ChristopherNeural');
+  const [chatterboxVoice, setChatterboxVoice] = useState('custom1');
   const [elevenLabsVoice, setElevenLabsVoice] = useState('pNInz6obpgDQGcFmaJgB');
   const [customVoiceId, setCustomVoiceId] = useState('');
   const [elevenLabsApiKey, setElevenLabsApiKey] = useState('');
   const [keySaved, setKeySaved] = useState(false);
 
   const [ttsSpeed, setTtsSpeed] = useState<number>(1.15);
+  const [exaggeration, setExaggeration] = useState<number>(0.5);
+  const [cfgWeight, setCfgWeight] = useState<number>(0.7);
 
   // Fetch saved settings on mount to pre-fill API keys & default voice
   useEffect(() => {
     fetch('/api/settings')
-      .then((res) => res.json())
+      .then((r) => r.json())
       .then((data) => {
         if (data.elevenLabsApiKey) setElevenLabsApiKey(data.elevenLabsApiKey);
-        if (data.ttsProvider) setProvider(data.ttsProvider as 'kokoro' | 'chatterbox' | 'elevenlabs');
-        if (data.kokoroVoice) setKokoroVoice(data.kokoroVoice);
       })
-      .catch((err) => console.warn('Could not load settings:', err));
+      .catch(() => {});
   }, []);
 
-  const handleSaveApiKey = async () => {
+  const saveApiKeyToSettings = async () => {
+    if (!elevenLabsApiKey.trim()) return;
     try {
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ elevenLabsApiKey, ttsProvider: provider, kokoroVoice }),
+        body: JSON.stringify({ elevenLabsApiKey: elevenLabsApiKey.trim() }),
       });
-      if (res.ok) {
+      const data = await res.json();
+      if (data.success) {
         setKeySaved(true);
         setTimeout(() => setKeySaved(false), 2500);
       }
@@ -79,6 +81,8 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
           provider,
           elevenLabsApiKey,
           ttsSpeed,
+          exaggeration,
+          cfgWeight,
         }),
       });
       const data = await res.json();
@@ -98,11 +102,8 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
   const KOKORO_VOICES = [
     { value: 'am_adam', label: '🎙️ Adam (Male Deep - High Energy)' },
     { value: 'am_michael', label: '🎙️ Michael (Male News Anchor - Default)' },
-    { value: 'am_echo', label: '🎙️ Echo (Male Smooth & Crisp)' },
-    { value: 'am_eric', label: '🎙️ Eric (Male Energetic)' },
-    { value: 'am_fenrir', label: '🎙️ Fenrir (Male Intense Deep)' },
-    { value: 'am_liam', label: '🎙️ Liam (Male Friendly & Warm)' },
-    { value: 'am_onyx', label: '🎙️ Onyx (Male Deep Resonant)' },
+    { value: 'am_fenrir', label: '🎙️ Fenrir (Male Intense Cinematic)' },
+    { value: 'am_puck', label: '🎙️ Puck (Male Warm Conversational)' },
     { value: 'bm_george', label: '🎙️ George (British Male Financial)' },
     { value: 'bm_daniel', label: '🎙️ Daniel (British Male Deep)' },
     { value: 'af_bella', label: '🎙️ Bella (Female Dynamic)' },
@@ -111,14 +112,11 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
   ];
 
   const CHATTERBOX_VOICES = [
-    { value: 'en-US-ChristopherNeural', label: '🎙️ Christopher (Male Deep News Anchor - Default)' },
-    { value: 'en-US-GuyNeural', label: '🎙️ Guy (Male High-Energy Deep)' },
-    { value: 'en-US-EricNeural', label: '🎙️ Eric (Male Deep Resonant)' },
-    { value: 'en-US-AndrewNeural', label: '🎙️ Andrew (Male Authoritative News)' },
-    { value: 'en-US-BrianNeural', label: '🎙️ Brian (Male Professional Narration)' },
-    { value: 'en-GB-RyanNeural', label: '🎙️ Ryan (British Male Financial)' },
-    { value: 'en-US-JennyNeural', label: '🎙️ Jenny (Female Dynamic)' },
-    { value: 'en-US-AriaNeural', label: '🎙️ Aria (Female Professional News)' },
+    { value: 'custom1', label: '🎙️ Custom Profile 1 (Sample Audio Folder 1)' },
+    { value: 'default', label: '🎙️ Chatterbox 500M Master Voice (Default)' },
+    { value: 'newsroom_anchor', label: '🎙️ Newsroom Male Anchor (Zero-Shot)' },
+    { value: 'storyteller_expressive', label: '🎙️ Expressive Storyteller (Zero-Shot)' },
+    { value: 'financial_analyst', label: '🎙️ Financial Analyst (Zero-Shot)' },
   ];
 
   const ELEVENLABS_VOICES = [
@@ -289,48 +287,112 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
             </div>
           </div>
         ) : provider === 'chatterbox' ? (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="sm:col-span-2">
-              <label className="block text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">
-                Chatterbox MAX Voice Profile
-              </label>
-              <select
-                value={chatterboxVoice}
-                onChange={(e) => setChatterboxVoice(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 font-medium"
-              >
-                {CHATTERBOX_VOICES.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs text-slate-400 font-semibold uppercase tracking-wider mb-2">
+                  Chatterbox 500M Voice Profile
+                </label>
+                <select
+                  value={chatterboxVoice}
+                  onChange={(e) => setChatterboxVoice(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-emerald-500 font-medium"
+                >
+                  {CHATTERBOX_VOICES.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                    Speaking Speed
+                  </label>
+                  <span className="text-xs font-mono font-bold text-emerald-400">{ttsSpeed.toFixed(2)}x</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0.80"
+                    max="1.50"
+                    step="0.05"
+                    value={ttsSpeed}
+                    onChange={(e) => setTtsSpeed(parseFloat(e.target.value))}
+                    className="w-full accent-emerald-400 cursor-pointer"
+                  />
+                  <input
+                    type="number"
+                    min="0.80"
+                    max="1.50"
+                    step="0.05"
+                    value={ttsSpeed}
+                    onChange={(e) => setTtsSpeed(parseFloat(e.target.value) || 1.15)}
+                    className="w-16 bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-center font-mono text-emerald-300 font-bold focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+              </div>
             </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-xs text-slate-400 font-semibold uppercase tracking-wider">
-                  Speaking Speed
-                </label>
-                <span className="text-xs font-mono font-bold text-emerald-400">{ttsSpeed.toFixed(2)}x</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-800/60">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                    Exaggeration
+                  </label>
+                  <span className="text-xs font-mono font-bold text-emerald-400">{exaggeration.toFixed(2)}</span>
+                </div>
+                <p className="text-[11px] text-amber-400/80 mb-2 font-medium">Neutral = 0.5, extreme values can be unstable</p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0.0"
+                    max="1.5"
+                    step="0.05"
+                    value={exaggeration}
+                    onChange={(e) => setExaggeration(parseFloat(e.target.value))}
+                    className="w-full accent-emerald-400 cursor-pointer"
+                  />
+                  <input
+                    type="number"
+                    min="0.0"
+                    max="1.5"
+                    step="0.05"
+                    value={exaggeration}
+                    onChange={(e) => setExaggeration(parseFloat(e.target.value) || 0.5)}
+                    className="w-16 bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-center font-mono text-emerald-300 font-bold focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="range"
-                  min="0.80"
-                  max="1.50"
-                  step="0.05"
-                  value={ttsSpeed}
-                  onChange={(e) => setTtsSpeed(parseFloat(e.target.value))}
-                  className="w-full accent-emerald-400 cursor-pointer"
-                />
-                <input
-                  type="number"
-                  min="0.80"
-                  max="1.50"
-                  step="0.05"
-                  value={ttsSpeed}
-                  onChange={(e) => setTtsSpeed(parseFloat(e.target.value) || 1.15)}
-                  className="w-16 bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-center font-mono text-emerald-300 font-bold focus:outline-none focus:border-emerald-500"
-                />
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs text-slate-400 font-semibold uppercase tracking-wider">
+                    CFG / Pace
+                  </label>
+                  <span className="text-xs font-mono font-bold text-emerald-400">{cfgWeight.toFixed(2)}</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mb-2">Prompt adherence & pacing guidance strength</p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="2.0"
+                    step="0.05"
+                    value={cfgWeight}
+                    onChange={(e) => setCfgWeight(parseFloat(e.target.value))}
+                    className="w-full accent-emerald-400 cursor-pointer"
+                  />
+                  <input
+                    type="number"
+                    min="0.1"
+                    max="2.0"
+                    step="0.05"
+                    value={cfgWeight}
+                    onChange={(e) => setCfgWeight(parseFloat(e.target.value) || 0.7)}
+                    className="w-16 bg-slate-950 border border-slate-800 rounded-xl px-2 py-2 text-xs text-center font-mono text-emerald-300 font-bold focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -373,7 +435,7 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
                   />
                   <button
                     type="button"
-                    onClick={handleSaveApiKey}
+                    onClick={saveApiKeyToSettings}
                     className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 border border-slate-700 text-slate-300 hover:bg-slate-800"
                   >
                     Save

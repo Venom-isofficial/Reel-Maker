@@ -171,75 +171,71 @@ export class RemotionService {
         const propsJsonPath = path.join(runDir, 'remotion_props.json');
         fs.writeFileSync(propsJsonPath, JSON.stringify(propsObj, null, 2), 'utf-8');
 
-        // 2. Remotion CLI Render with explicit NVIDIA discrete GPU preference flags
-        const rootPath = path.resolve(process.cwd(), 'src/remotion/Root.tsx');
-        const cmd = `npx remotion render "${rootPath.replace(/\\/g, '/')}" ReelComposition "${finalMp4Path.replace(/\\/g, '/')}" --props="${propsJsonPath.replace(/\\/g, '/')}" --gl=angle --enable-gpu --chromium-flags="--ignore-gpu-blocklist --gpu-preference=2 --gpu-preference=high-performance --force-high-performance-gpu --enable-gpu-rasterization --enable-zero-copy --use-gl=angle --use-angle=d3d11 --disable-software-rasterizer" --concurrency=2`;
-        
-        const nvidiaEnv = {
-          ...process.env,
-          CUDA_VISIBLE_DEVICES: '0',
-          SHIM_MCCOMPAT_ID: '1',
-          __NV_PRIME_RENDER_OFFLOAD: '1',
-          __GLX_VENDOR_LIBRARY_NAME: 'nvidia',
-        };
-
-        console.log(`Executing Remotion CLI GPU render on Discrete NVIDIA GPU: ${cmd}`);
-        await execAsync(cmd, { env: nvidiaEnv, timeout: 180000 });
-
-        if (fs.existsSync(finalMp4Path) && fs.statSync(finalMp4Path).size > 100000) {
-          console.log(`✅ Remotion CLI Render Complete with Subtitles Overlay (${fs.statSync(finalMp4Path).size} bytes)`);
-          server.close();
-          return { success: true, retryable: false, data: finalMp4Path };
-        }
-      } catch (cliErr: any) {
-        console.warn("Remotion CLI render note:", cliErr.message);
-      } finally {
-        server.close();
-      }
-
-      // 3. Fallback: FFmpeg Subtitle Burn-In Muxer (NVIDIA NVENC GPU Accelerated)
-      if (stitchedLocalPath && fs.existsSync(voicePath)) {
+        // 1. Primary Engine: Remotion CLI Render (Renders original Bangers/Montserrat animated yellow subtitles)
         try {
-          let filterChain = '';
-          const assPath = path.join(runDir, 'captions.ass');
-          if (fs.existsSync(assPath)) {
-            const escapedAss = assPath.replace(/\\/g, '/').replace(/:/g, '\\:');
-            filterChain = `-vf "ass='${escapedAss}'"`;
-          } else if (fs.existsSync(srtPath)) {
-            const escapedSrt = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:');
-            filterChain = `-vf "subtitles='${escapedSrt}':force_style='Fontname=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=2,Alignment=2,MarginV=120,Bold=1,Italic=1'"`;
-          }
+          const rootPath = path.resolve(process.cwd(), 'src/remotion/Root.tsx');
+          const cmd = `npx remotion render "${rootPath.replace(/\\/g, '/')}" ReelComposition "${finalMp4Path.replace(/\\/g, '/')}" --props="${propsJsonPath.replace(/\\/g, '/')}" --gl=angle --enable-gpu --chromium-flags="--ignore-gpu-blocklist --gpu-active-vendor-id=0x10de --gpu-preference=2 --gpu-preference=high-performance --force-high-performance-gpu --enable-gpu-rasterization --enable-zero-copy --use-gl=angle --use-angle=d3d11 --disable-software-rasterizer" --concurrency=2`;
+          
+          const nvidiaEnv = {
+            ...process.env,
+            CUDA_VISIBLE_DEVICES: '0',
+            SHIM_MCCOMPAT_ID: '1',
+            __NV_PRIME_RENDER_OFFLOAD: '1',
+            __GLX_VENDOR_LIBRARY_NAME: 'nvidia',
+          };
 
-          // Attempt NVIDIA NVENC GPU hardware encoder first
+          console.log(`🚀 Executing Remotion GPU Render (Bangers/Montserrat Animated Captions)...`);
+          await execAsync(cmd, { env: nvidiaEnv, timeout: 180000 });
+
+          if (fs.existsSync(finalMp4Path) && fs.statSync(finalMp4Path).size > 100000) {
+            console.log(`✅ Remotion GPU Render Complete with Original Styled Captions (${fs.statSync(finalMp4Path).size} bytes)`);
+            server.close();
+            return { success: true, retryable: false, data: finalMp4Path };
+          }
+        } catch (cliErr: any) {
+          console.warn('Remotion CLI render note:', cliErr.message);
+        }
+
+        // 2. Secondary Engine: FFmpeg NVENC Subtitle Burn-In (Fallback)
+        if (stitchedLocalPath && fs.existsSync(voicePath)) {
           try {
+            let filterChain = '';
+            const assPath = path.join(runDir, 'captions.ass');
+            if (fs.existsSync(assPath)) {
+              const escapedAss = assPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+              filterChain = `-vf "ass='${escapedAss}'"`;
+            } else if (fs.existsSync(srtPath)) {
+              const escapedSrt = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:');
+              filterChain = `-vf "subtitles='${escapedSrt}':force_style='Fontname=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=3,Shadow=2,Alignment=2,MarginV=120,Bold=1,Italic=1'"`;
+            }
+
+            console.log(`Fallback: Executing FFmpeg NVENC Subtitle Burn-In...`);
             const nvencMuxCmd = `ffmpeg -y -i "${stitchedLocalPath.replace(/\\/g, '/')}" -i "${voicePath.replace(/\\/g, '/')}" ${filterChain} -c:v h264_nvenc -gpu 0 -preset p4 -pix_fmt yuv420p -c:a aac -shortest "${finalMp4Path.replace(/\\/g, '/')}"`;
             await execAsync(nvencMuxCmd, { timeout: 60000 });
 
             if (fs.existsSync(finalMp4Path) && fs.statSync(finalMp4Path).size > 100000) {
-              console.log(`✅ NVIDIA NVENC GPU FFmpeg Subtitle Burn-In Succeeded (${fs.statSync(finalMp4Path).size} bytes)`);
+              console.log(`✅ FFmpeg NVENC Subtitle Burn-In Complete (${fs.statSync(finalMp4Path).size} bytes)`);
+              server.close();
               return { success: true, retryable: false, data: finalMp4Path };
             }
           } catch (nvencMuxErr: any) {
-            console.warn('NVENC FFmpeg subtitle muxing fallback to libx264:', nvencMuxErr.message);
+            console.warn('NVENC FFmpeg GPU rendering note:', nvencMuxErr.message);
           }
-
-          const muxCmd = `ffmpeg -y -i "${stitchedLocalPath.replace(/\\/g, '/')}" -i "${voicePath.replace(/\\/g, '/')}" ${filterChain} -c:v libx264 -preset ultrafast -c:a aac -shortest "${finalMp4Path.replace(/\\/g, '/')}"`;
-          await execAsync(muxCmd, { timeout: 60000 });
-
-          if (fs.existsSync(finalMp4Path) && fs.statSync(finalMp4Path).size > 100000) {
-            console.log(`✅ FFmpeg Subtitle Burn-In Muxing Succeeded (${fs.statSync(finalMp4Path).size} bytes)`);
-            return { success: true, retryable: false, data: finalMp4Path };
-          }
-        } catch (muxErr: any) {
-          console.warn('FFmpeg subtitle muxing fallback error:', muxErr.message);
         }
-      }
 
-      return {
-        success: false,
-        retryable: true,
-        errorMessage: 'Remotion render and FFmpeg video stitching both failed.',
-      };
+        return {
+          success: false,
+          retryable: true,
+          errorMessage: 'Remotion render and FFmpeg video stitching both failed.',
+        };
+      } catch (innerErr: any) {
+        server.close();
+        return {
+          success: false,
+          retryable: true,
+          errorMessage: `Inner render failed: ${innerErr.message}`,
+        };
+      }
     } catch (err: any) {
       return {
         success: false,

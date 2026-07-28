@@ -91,8 +91,9 @@ export class SubtitleService {
       for (let idx = 0; idx < chunk.length; idx++) {
         const activeWord = chunk[idx];
         const nextWord = chunk[idx + 1];
-        const start = activeWord.start - 0.05;
-        const end = nextWord ? nextWord.start - 0.01 : activeWord.end + 0.25;
+        const start = activeWord.start;
+        // Strictly prevent timestamp overlap so libass collision handler never stacks duplicate lines
+        const end = nextWord ? Math.max(start + 0.1, nextWord.start - 0.02) : activeWord.end + 0.15;
 
         // Build line with active word in Yellow (\c&H00FFFF&) and inactive in White (\c&HFFFFFF&)
         const lineText = chunk
@@ -119,7 +120,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial,54,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,1,1,0,0,100,100,2,0,1,3.5,2,2,40,40,220,1
+Style: Default,Arial Black,58,&H00FFFFFF,&H0000FFFF,&H00000000,&H00000000,1,1,0,0,100,100,2,0,1,3.5,2,2,40,40,220,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

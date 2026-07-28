@@ -54,10 +54,9 @@ export const CaptionsOverlay: React.FC<{ words: CaptionWord[] }> = ({ words = []
   }
 
   // Find active 2-4 word chunk for current video frame
-  const activePhrase =
-    phrases.find((p) => currentTime >= p.start && currentTime <= p.end) ||
-    phrases.find((p) => currentTime < p.start) ||
-    phrases[phrases.length - 1];
+  const activePhrase = phrases.find(
+    (p) => currentTime >= (p.start - 0.05) && currentTime <= (p.end + 0.1)
+  );
 
   if (!activePhrase || !activePhrase.words || activePhrase.words.length === 0) return null;
 

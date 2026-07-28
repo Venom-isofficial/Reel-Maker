@@ -76,9 +76,18 @@ app.post('/api/wizard/step2-scenes', async (req, res) => {
 // Step 3: Generate voice TTS
 app.post('/api/wizard/step3-voice', async (req, res) => {
   try {
-    const { scriptText, runId, voiceName, provider, elevenLabsApiKey, ttsSpeed } = req.body;
+    const { scriptText, runId, voiceName, provider, elevenLabsApiKey, ttsSpeed, exaggeration, cfgWeight } = req.body;
     if (!scriptText || !runId) return res.status(400).json({ success: false, message: 'scriptText and runId required' });
-    const result = await orchestrator.wizardStep3_Voice(scriptText, runId, voiceName, provider, elevenLabsApiKey, ttsSpeed ? parseFloat(ttsSpeed) : undefined);
+    const result = await orchestrator.wizardStep3_Voice(
+      scriptText,
+      runId,
+      voiceName,
+      provider,
+      elevenLabsApiKey,
+      ttsSpeed ? parseFloat(ttsSpeed) : undefined,
+      exaggeration ? parseFloat(exaggeration) : undefined,
+      cfgWeight ? parseFloat(cfgWeight) : undefined
+    );
     res.json({ success: true, ...result });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });

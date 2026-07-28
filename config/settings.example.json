@@ -1,0 +1,17 @@
+{
+  "finnhubApiKey": "YOUR_FINNHUB_API_KEY",
+  "geminiApiKey": "YOUR_GEMINI_API_KEY",
+  "pexelsApiKey": "YOUR_PEXELS_API_KEY",
+  "whisperApiKey": "YOUR_WHISPER_API_KEY",
+  "elevenLabsApiKey": "",
+  "ttsProvider": "kokoro",
+  "kokoroVoice": "am_michael",
+  "outputFolder": "./workspace",
+  "videoQuality": "720p",
+  "voice": "am_michael",
+  "subtitleStyle": "animated-highlight",
+  "theme": "dark",
+  "logoUrl": "",
+  "watermarkText": "AI Reel Factory",
+  "bgMusicPath": ""
+}

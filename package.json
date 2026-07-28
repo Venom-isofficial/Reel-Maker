@@ -12,9 +12,9 @@
     "remotion:preview": "remotion preview src/remotion/Root.tsx"
   },
   "dependencies": {
-    "@remotion/cli": "^4.0.100",
-    "@remotion/google-fonts": "^4.0.499",
-    "@remotion/player": "^4.0.100",
+    "@remotion/cli": "4.0.496",
+    "@remotion/google-fonts": "4.0.496",
+    "@remotion/player": "4.0.496",
     "axios": "^1.6.8",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -24,7 +24,7 @@
     "lucide-react": "^0.368.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "remotion": "^4.0.100"
+    "remotion": "4.0.496"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

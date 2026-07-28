@@ -129,7 +129,9 @@ export class VoiceService {
     voiceName: string = process.env.KOKORO_VOICE || 'am_michael',
     provider?: string,
     elevenLabsApiKey?: string,
-    ttsSpeed?: number
+    ttsSpeed?: number,
+    exaggeration?: number,
+    cfgWeight?: number
   ): Promise<ServiceResult<{ audioPath: string; duration: number }>> {
     try {
       const dir = path.dirname(outputMp3Path);
@@ -148,33 +150,55 @@ export class VoiceService {
         console.warn('ElevenLabs TTS failed or unconfigured, falling back to local Chatterbox / Kokoro TTS:', elRes.errorMessage);
       }
 
-      // 0b. Chatterbox MAX Neural Studio Engine (High Fidelity Neural Voices)
+      // 0b. Official Resemble AI Chatterbox 500M Local PyTorch TTS Engine
       if (ttsEngine === 'chatterbox') {
         try {
-          const pythonScript = path.resolve(process.cwd(), 'scripts/chatterbox_tts.py');
-          if (fs.existsSync(pythonScript)) {
-            const cbVoice = voiceName || 'en-US-ChristopherNeural';
-            console.log(`Generating studio voice audio via Chatterbox MAX Neural TTS (voice: ${cbVoice}, speed: ${speedVal}x)...`);
+          console.log(`Generating local voice audio via Resemble AI Chatterbox 500M PyTorch Server (speed: ${speedVal}x, exaggeration: ${exaggeration ?? 0.5}, cfg: ${cfgWeight ?? 0.7})...`);
 
-            const tempTxtPath = path.join(dir, 'script_prompt.txt');
-            fs.writeFileSync(tempTxtPath, scriptText, 'utf-8');
+          // Auto-start check: If Chatterbox server is offline, launch scripts/chatterbox_server.py
+          let serverOnline = false;
+          try {
+            const healthRes = await axios.get('http://127.0.0.1:8002/health', { timeout: 2000 });
+            if (healthRes.data && healthRes.data.status === 'online') serverOnline = true;
+          } catch (e) {
+            serverOnline = false;
+          }
 
-            const cmd = `python "${pythonScript.replace(/\\/g, '/')}" "${tempTxtPath.replace(/\\/g, '/')}" "${outputMp3Path.replace(/\\/g, '/')}" "${cbVoice}" "${speedVal}"`;
-            await execAsync(cmd, { timeout: 60000 });
-
-            if (fs.existsSync(outputMp3Path) && fs.statSync(outputMp3Path).size > 1000) {
-              const exactDur = await this.getExactAudioDuration(outputMp3Path);
-              const duration = exactDur || Math.max(12, Math.ceil(scriptText.split(' ').length / 3.2));
-              console.log(`✅ Chatterbox MAX Voice MP3 created successfully (${fs.statSync(outputMp3Path).size} bytes, exact audio duration: ${duration}s)`);
-              return {
-                success: true,
-                retryable: false,
-                data: { audioPath: outputMp3Path, duration },
-              };
+          if (!serverOnline) {
+            console.log('⏳ Starting local Chatterbox 500M Model Server on http://127.0.0.1:8002...');
+            const pyServerScript = path.resolve(process.cwd(), 'scripts/chatterbox_server.py');
+            if (fs.existsSync(pyServerScript)) {
+              execAsync(`python "${pyServerScript.replace(/\\/g, '/')}" --port 8002`);
+              // Wait for server startup & model load
+              await new Promise((r) => setTimeout(r, 6000));
             }
           }
+
+          const response = await axios.post(
+            'http://127.0.0.1:8002/synthesize',
+            {
+              text: scriptText,
+              output_path: outputMp3Path,
+              voice_preset: voiceName || 'default',
+              cfg_weight: cfgWeight !== undefined ? cfgWeight : 0.7,
+              exaggeration: exaggeration !== undefined ? exaggeration : 0.5,
+              speed: speedVal,
+            },
+            { timeout: 120000 }
+          );
+
+          if (fs.existsSync(outputMp3Path) && fs.statSync(outputMp3Path).size > 1000) {
+            const exactDur = await this.getExactAudioDuration(outputMp3Path);
+            const duration = exactDur || Math.max(12, Math.ceil(scriptText.split(' ').length / 3.2));
+            console.log(`✅ Chatterbox 500M Local Voice MP3 created successfully (${fs.statSync(outputMp3Path).size} bytes, exact audio duration: ${duration}s)`);
+            return {
+              success: true,
+              retryable: false,
+              data: { audioPath: outputMp3Path, duration },
+            };
+          }
         } catch (cbErr: any) {
-          console.warn('Chatterbox MAX TTS warning, falling back to Kokoro:', cbErr.message);
+          console.warn('Official Chatterbox 500M TTS warning, falling back to Kokoro Local:', cbErr.message);
         }
       }
 
