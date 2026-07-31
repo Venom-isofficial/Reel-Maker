@@ -6,6 +6,17 @@ import tempfile
 import subprocess
 from pathlib import Path
 
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if sys.stderr and hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 # Organize all model weights strictly inside the project directory
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 PROJECT_MODELS_DIR = os.path.join(PROJECT_ROOT, "scripts", "models")
@@ -36,9 +47,13 @@ class SynthesizeRequest(BaseModel):
     text: str
     output_path: str
     voice_preset: str = "default"
-    cfg_weight: float = 1.0
-    exaggeration: float = 1.0
+    cfg_weight: float = 0.7
+    exaggeration: float = 0.5
     speed: float = 1.0
+    temperature: float = 0.8
+    repetition_penalty: float = 1.2
+    top_p: float = 1.0
+    min_p: float = 0.05
 
 def load_chatterbox_model():
     global model_instance, device_name
@@ -79,35 +94,45 @@ def health_check():
     }
 
 def resolve_audio_prompt(voice_preset: str) -> str | None:
-    if not voice_preset or voice_preset in ["default", "master"]:
-        return None
-    
     samples_base = os.path.abspath(os.path.join(os.path.dirname(__file__), "models", "ChatterboxTrainingAudioSamples"))
     candidates = [voice_preset]
+    if voice_preset in ["default", "master"]:
+        candidates.extend(["default", "master"])
     if voice_preset.startswith("custom"):
-        candidates.append(voice_preset.replace("custom", ""))
+        raw_num = voice_preset.replace("custom", "")
+        candidates.extend([raw_num, f"custom_{raw_num}", f"profile_{raw_num}"])
     
     for cand in candidates:
+        if not cand:
+            continue
         profile_dir = os.path.join(samples_base, cand)
         if os.path.isdir(profile_dir):
             ref_wav = os.path.join(profile_dir, "reference.wav")
-            if os.path.exists(ref_wav):
-                return ref_wav
+            audio_files = [
+                os.path.join(profile_dir, f) for f in os.listdir(profile_dir)
+                if f.lower().endswith(('.mp3', '.wav', '.m4a', '.flac', '.ogg')) and f != "reference.wav"
+            ]
             
-            audio_files = [os.path.join(profile_dir, f) for f in os.listdir(profile_dir) if f.lower().endswith(('.mp3', '.wav', '.m4a', '.flac', '.ogg')) and f != "reference.wav"]
-            if audio_files:
+            need_rebuild = not os.path.exists(ref_wav)
+            if not need_rebuild and audio_files:
+                ref_mtime = os.path.getmtime(ref_wav)
+                if any(os.path.getmtime(af) > ref_mtime for af in audio_files):
+                    need_rebuild = True
+
+            if need_rebuild and audio_files:
                 try:
-                    inputs = []
-                    for f in audio_files:
-                        inputs.extend(["-i", f])
-                    filter_str = "".join([f"[{i}:a]" for i in range(len(audio_files))]) + f"concat=n={len(audio_files)}:v=0:a=1[outa]"
-                    cmd = ["ffmpeg", "-y"] + inputs + ["-filter_complex", filter_str, "-map", "[outa]", "-ar", "24000", "-ac", "1", ref_wav]
+                    print(f"🎙️ Rebuilding 10s normalized reference audio for '{cand}' from {len(audio_files)} sample files...")
+                    first_audio = audio_files[0]
+                    cmd = ["ffmpeg", "-y", "-i", first_audio, "-ss", "0", "-t", "10", "-af", "loudnorm", "-ar", "24000", "-ac", "1", ref_wav]
                     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    if os.path.exists(ref_wav):
-                        return ref_wav
                 except Exception as e:
                     print(f"Warning: Could not build reference.wav for profile {cand}: {e}")
                     return audio_files[0]
+
+            if os.path.exists(ref_wav):
+                return ref_wav
+            elif audio_files:
+                return audio_files[0]
     return None
 
 @app.post("/synthesize")
@@ -126,9 +151,15 @@ def synthesize(req: SynthesizeRequest):
     try:
         audio_prompt = resolve_audio_prompt(req.voice_preset)
         if audio_prompt:
-            print(f"🎙️ Using Custom Voice Profile ({req.voice_preset}) reference: {audio_prompt}")
+            print(f"🎙️ [VOICE CLONE] Preparing speaker embedding for '{req.voice_preset}' from: {audio_prompt}")
+            try:
+                model_instance.prepare_conditionals(audio_prompt, exaggeration=req.exaggeration)
+            except Exception as cond_err:
+                print(f"Warning: Failed to prepare conditionals directly: {cond_err}")
+        else:
+            print(f"⚠️ [VOICE WARNING] No custom reference audio found for preset '{req.voice_preset}', using default speaker embedding.")
         
-        print(f"Synthesizing Chatterbox 500M Audio (Preset: {req.voice_preset}, CFG: {req.cfg_weight}, Exaggeration: {req.exaggeration}, Speed: {req.speed}x)...")
+        print(f"Synthesizing Chatterbox 500M Audio (Preset: {req.voice_preset}, CFG: {req.cfg_weight}, Exaggeration: {req.exaggeration}, Temp: {req.temperature}, RepPenalty: {req.repetition_penalty}, TopP: {req.top_p}, Speed: {req.speed}x)...")
         
         out_dir = Path(req.output_path).parent
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -139,7 +170,11 @@ def synthesize(req: SynthesizeRequest):
         gen_kwargs = {
             "text": req.text,
             "cfg_weight": req.cfg_weight,
-            "exaggeration": req.exaggeration
+            "exaggeration": req.exaggeration,
+            "temperature": req.temperature,
+            "repetition_penalty": req.repetition_penalty,
+            "top_p": req.top_p,
+            "min_p": req.min_p
         }
         if audio_prompt:
             gen_kwargs["audio_prompt_path"] = audio_prompt

@@ -133,6 +133,8 @@ export interface AppSettings {
   pexelsApiKey: string;
   whisperApiKey: string;
   elevenLabsApiKey?: string;
+  muapiApiKey?: string;
+  vadooApiKey?: string;
   ttsProvider?: string;
   kokoroVoice: string;
   whisperDevice?: string;

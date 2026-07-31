@@ -55,7 +55,13 @@ export class VoiceService {
     scriptText: string,
     outputMp3Path: string,
     voiceId: string = 'pNInz6obpgDQGcFmaJgB',
-    apiKey?: string
+    apiKey?: string,
+    stability?: number,
+    similarityBoost?: number,
+    style?: number,
+    useSpeakerBoost?: boolean,
+    applyTextNormalization?: string,
+    speed?: number
   ): Promise<ServiceResult<{ audioPath: string; duration: number }>> {
     const key = apiKey || process.env.ELEVENLABS_API_KEY || '';
     if (!key) {
@@ -67,16 +73,20 @@ export class VoiceService {
     }
 
     try {
-      console.log(`Generating ElevenLabs Cloud AI TTS (Voice ID: ${voiceId})...`);
+      console.log(`Generating ElevenLabs Cloud AI TTS (Voice ID: ${voiceId}, Speed: ${speed ?? 1.0}x, Stability: ${stability ?? 0.5}, Similarity: ${similarityBoost ?? 0.75}, Style: ${style ?? 0.0})...`);
       const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
       const response = await axios.post(
         url,
         {
           text: scriptText,
           model_id: 'eleven_multilingual_v2',
+          apply_text_normalization: applyTextNormalization || 'auto',
           voice_settings: {
-            stability: 0.5,
-            similarity_boost: 0.75,
+            stability: stability !== undefined ? stability : 0.5,
+            similarity_boost: similarityBoost !== undefined ? similarityBoost : 0.75,
+            style: style !== undefined ? style : 0.0,
+            use_speaker_boost: useSpeakerBoost !== undefined ? useSpeakerBoost : true,
+            speed: speed !== undefined ? speed : 1.0,
           },
         },
         {
@@ -93,15 +103,14 @@ export class VoiceService {
       if (response.data) {
         fs.writeFileSync(outputMp3Path, Buffer.from(response.data));
         
-        // Fast-paced narration speed boost (1.15x) for viral reel energy
-        const speedBoost = parseFloat(process.env.TTS_SPEED || '1.15');
-        if (speedBoost > 1.0) {
-          await this.applySpeedFilter(outputMp3Path, speedBoost);
+        // Apply optional additional speed filter if requested speed > 1.2
+        if (speed && speed > 1.2) {
+          await this.applySpeedFilter(outputMp3Path, speed / 1.2);
         }
 
         const exactDur = await this.getExactAudioDuration(outputMp3Path);
         const duration = exactDur || Math.max(12, Math.ceil(scriptText.split(' ').length / 3.2));
-        console.log(`✅ ElevenLabs Fast-Paced Voice MP3 generated successfully (${fs.statSync(outputMp3Path).size} bytes, duration: ${duration}s)`);
+        console.log(`✅ ElevenLabs Voice MP3 generated successfully (${fs.statSync(outputMp3Path).size} bytes, duration: ${duration}s)`);
         return {
           success: true,
           retryable: false,
@@ -131,7 +140,15 @@ export class VoiceService {
     elevenLabsApiKey?: string,
     ttsSpeed?: number,
     exaggeration?: number,
-    cfgWeight?: number
+    cfgWeight?: number,
+    temperature?: number,
+    repetitionPenalty?: number,
+    topP?: number,
+    stability?: number,
+    similarityBoost?: number,
+    style?: number,
+    useSpeakerBoost?: boolean,
+    applyTextNormalization?: string
   ): Promise<ServiceResult<{ audioPath: string; duration: number }>> {
     try {
       const dir = path.dirname(outputMp3Path);
@@ -145,7 +162,18 @@ export class VoiceService {
         const elVoice = (voiceName && !voiceName.startsWith('am_') && !voiceName.startsWith('af_') && !voiceName.startsWith('bm_') && !voiceName.startsWith('bf_') && !voiceName.startsWith('en-'))
           ? voiceName
           : 'pNInz6obpgDQGcFmaJgB';
-        const elRes = await this.generateVoiceElevenLabs(scriptText, outputMp3Path, elVoice, elevenLabsApiKey);
+        const elRes = await this.generateVoiceElevenLabs(
+          scriptText,
+          outputMp3Path,
+          elVoice,
+          elevenLabsApiKey,
+          stability,
+          similarityBoost,
+          style,
+          useSpeakerBoost,
+          applyTextNormalization,
+          ttsSpeed
+        );
         if (elRes.success) return elRes;
         console.warn('ElevenLabs TTS failed or unconfigured, falling back to local Chatterbox / Kokoro TTS:', elRes.errorMessage);
       }
@@ -153,7 +181,7 @@ export class VoiceService {
       // 0b. Official Resemble AI Chatterbox 500M Local PyTorch TTS Engine
       if (ttsEngine === 'chatterbox') {
         try {
-          console.log(`Generating local voice audio via Resemble AI Chatterbox 500M PyTorch Server (speed: ${speedVal}x, exaggeration: ${exaggeration ?? 0.5}, cfg: ${cfgWeight ?? 0.7})...`);
+          console.log(`Generating local voice audio via Resemble AI Chatterbox 500M PyTorch Server (speed: ${speedVal}x, exaggeration: ${exaggeration ?? 0.5}, cfg: ${cfgWeight ?? 0.7}, temp: ${temperature ?? 0.8}, rep: ${repetitionPenalty ?? 1.2})...`);
 
           // Auto-start check: If Chatterbox server is offline, launch scripts/chatterbox_server.py
           let serverOnline = false;
@@ -183,6 +211,9 @@ export class VoiceService {
               cfg_weight: cfgWeight !== undefined ? cfgWeight : 0.7,
               exaggeration: exaggeration !== undefined ? exaggeration : 0.5,
               speed: speedVal,
+              temperature: temperature !== undefined ? temperature : 0.8,
+              repetition_penalty: repetitionPenalty !== undefined ? repetitionPenalty : 1.2,
+              top_p: topP !== undefined ? topP : 1.0,
             },
             { timeout: 120000 }
           );
@@ -206,12 +237,15 @@ export class VoiceService {
       try {
         const pythonScript = path.resolve(process.cwd(), 'scripts/kokoro_tts.py');
         if (fs.existsSync(pythonScript)) {
-          console.log(`Generating studio voice audio via Kokoro Local TTS (voice: ${voiceName}, speed: ${speedVal}x)...`);
+          const isMale = voiceName?.toLowerCase().includes('male') || voiceName?.toLowerCase().includes('anchor') || voiceName?.startsWith('custom') || voiceName === 'default';
+          const targetKokoroVoice = (voiceName && !voiceName.startsWith('custom')) ? voiceName : (isMale ? 'am_adam' : 'af_heart');
+
+          console.log(`Generating studio voice audio via Kokoro Local TTS (voice: ${targetKokoroVoice}, speed: ${speedVal}x)...`);
 
           const tempTxtPath = path.join(dir, 'script_prompt.txt');
           fs.writeFileSync(tempTxtPath, scriptText, 'utf-8');
 
-          const cmd = `python "${pythonScript.replace(/\\/g, '/')}" "${tempTxtPath.replace(/\\/g, '/')}" "${outputMp3Path.replace(/\\/g, '/')}" "${voiceName}" "${speedVal}"`;
+          const cmd = `python "${pythonScript.replace(/\\/g, '/')}" "${tempTxtPath.replace(/\\/g, '/')}" "${outputMp3Path.replace(/\\/g, '/')}" "${targetKokoroVoice}" "${speedVal}"`;
           await execAsync(cmd, { timeout: 60000 });
 
           if (fs.existsSync(outputMp3Path) && fs.statSync(outputMp3Path).size > 1000) {

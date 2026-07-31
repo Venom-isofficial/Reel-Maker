@@ -183,7 +183,7 @@ export class AIService {
 
     const extractKeywordsFromText = (str: string): string => {
       const cleanWords = str.toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 3 && !['this', 'that', 'with', 'from', 'have', 'more', 'about', 'will', 'these', 'their', 'they', 'what', 'which', 'when', 'shows', 'email', 'warn', 'reuters', 'breaking', 'news'].includes(w));
-      return Array.from(new Set(cleanWords)).slice(0, 3).join(' ') || 'business market';
+      return Array.from(new Set(cleanWords)).slice(0, 3).join(' ') || 'news event';
     };
 
     const transitions = ['fade', 'zoom-in', 'wipe', 'cross-dissolve', 'fade', 'zoom-in'];
@@ -204,6 +204,7 @@ export class AIService {
           : isCta
           ? `Vertical 9:16 mobile phone screen showing social media discussion`
           : `Vertical 9:16 photorealistic visual of ${kw}`,
+        searchKeyword: kw,
         transition: transitions[idx % transitions.length],
         status: 'pending',
         retries: 0
@@ -308,7 +309,7 @@ export class AIService {
         const text = `${sc.videoPrompt} ${sc.subtitleText} ${sc.narrationText}`.toLowerCase();
         const words = text.replace(/[^\w\s]/g, '').split(/\s+/).filter((w) => w.length > 3 && !['vertical', 'photorealistic', 'cinematic', 'shot', 'lighting', 'with', 'this', 'that', 'from', 'have', 'more', 'about'].includes(w));
         const uniqueWords = Array.from(new Set(words)).slice(0, 3);
-        const searchKeyword = uniqueWords.join(' ') || 'business corporate';
+        const searchKeyword = uniqueWords.join(' ') || (sc.narrationText ? sc.narrationText.split(' ').slice(0, 3).join(' ') : 'news event');
 
         return {
           sceneNumber: sc.sceneNumber,

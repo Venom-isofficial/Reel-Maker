@@ -11,6 +11,10 @@ import { VoiceService } from '../services/VoiceService';
 import { SubtitleService } from '../services/SubtitleService';
 import { VideoService } from '../services/VideoService';
 import { RemotionService } from '../services/RemotionService';
+import { ComfyUIService } from '../services/ComfyUIService';
+import { MuAPIService } from '../services/MuAPIService';
+import { VadooService } from '../services/VadooService';
+import { WanGPService } from '../services/WanGPService';
 import {
   PipelineStage, PipelineState, WizardState, WizardStepId,
   NewsArticle, GeminiAnalysis, ScriptOutput, MasterPlan,
@@ -26,12 +30,16 @@ export class PipelineOrchestrator {
   private subtitleService: SubtitleService;
   private videoService: VideoService;
   private remotionService: RemotionService;
+  private comfyUIService: ComfyUIService;
+  private muAPIService: MuAPIService;
+  private vadooService: VadooService;
+  private wanGPService: WanGPService;
 
   private currentState?: PipelineState;
   private wizardState?: WizardState;
   private isRunning: boolean = false;
 
-  private activeVoiceGenerations: Map<string, Promise<{ audioUrl: string; duration: number }>> = new Map();
+  private activeVoiceGenerations: Map<string, Promise<{ audioUrl: string; duration: number; history: any[] }>> = new Map();
   private activeVideoRenders: Map<string, Promise<{ finalVideoUrl: string }>> = new Map();
 
   constructor(
@@ -42,7 +50,10 @@ export class PipelineOrchestrator {
     voiceService: VoiceService,
     subtitleService: SubtitleService,
     videoService: VideoService,
-    remotionService: RemotionService
+    remotionService: RemotionService,
+    muapiApiKey?: string,
+    vadooApiKey?: string,
+    comfyuiUrl?: string
   ) {
     this.storageService = storageService;
     this.logger = logger;
@@ -52,6 +63,10 @@ export class PipelineOrchestrator {
     this.subtitleService = subtitleService;
     this.videoService = videoService;
     this.remotionService = remotionService;
+    this.comfyUIService = new ComfyUIService(comfyuiUrl || 'http://127.0.0.1:8188');
+    this.muAPIService = new MuAPIService(muapiApiKey);
+    this.vadooService = new VadooService(vadooApiKey);
+    this.wanGPService = new WanGPService();
   }
 
   public getCurrentState(): PipelineState | null {
@@ -152,11 +167,20 @@ export class PipelineOrchestrator {
     elevenLabsApiKey?: string,
     ttsSpeed?: number,
     exaggeration?: number,
-    cfgWeight?: number
-  ): Promise<{ audioUrl: string; duration: number }> {
-    if (this.activeVoiceGenerations.has(runId)) {
-      this.logger.info(`🎙️ Joining already active voice generation task for ${runId}`);
-      return this.activeVoiceGenerations.get(runId)!;
+    cfgWeight?: number,
+    temperature?: number,
+    repetitionPenalty?: number,
+    topP?: number,
+    stability?: number,
+    similarityBoost?: number,
+    style?: number,
+    useSpeakerBoost?: boolean,
+    applyTextNormalization?: string
+  ): Promise<{ audioUrl: string; duration: number; history: any[] }> {
+    const lockKey = runId;
+    if (this.activeVoiceGenerations.has(lockKey)) {
+      this.logger.info(`⏳ Waiting for in-progress voice generation for run ${runId}...`);
+      return this.activeVoiceGenerations.get(lockKey)!;
     }
 
     const taskPromise = (async () => {
@@ -164,15 +188,101 @@ export class PipelineOrchestrator {
         const runDir = this.storageService.getRunDir(runId);
         this.logger.info(`🎙️ Wizard Step 3: Generating voice audio (${provider || 'kokoro'}) for ${runId}`);
 
-        const voiceMp3Path = this.storageService.getFilePath(runDir, 'voice.mp3');
-        const voiceRes = await this.voiceService.generateVoice(scriptText, voiceMp3Path, voiceName, provider, elevenLabsApiKey, ttsSpeed, exaggeration, cfgWeight);
+        const voicesDir = path.join(runDir, 'voices');
+        if (!fs.existsSync(voicesDir)) {
+          fs.mkdirSync(voicesDir, { recursive: true });
+        }
+
+        const historyPath = path.join(voicesDir, 'history.json');
+        let history: any[] = [];
+        if (fs.existsSync(historyPath)) {
+          try {
+            history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
+          } catch (e) {
+            history = [];
+          }
+        }
+
+        const nextId = history.length > 0 ? Math.max(...history.map((h: any) => h.id || 0)) + 1 : 1;
+        const targetVoiceFile = path.join(voicesDir, `${nextId}.mp3`);
+        const rootVoiceFile = this.storageService.getFilePath(runDir, 'voice.mp3');
+
+        const voiceRes = await this.voiceService.generateVoice(
+          scriptText,
+          targetVoiceFile,
+          voiceName,
+          provider,
+          elevenLabsApiKey,
+          ttsSpeed,
+          exaggeration,
+          cfgWeight,
+          temperature,
+          repetitionPenalty,
+          topP,
+          stability,
+          similarityBoost,
+          style,
+          useSpeakerBoost,
+          applyTextNormalization
+        );
         if (!voiceRes.success) throw new Error(voiceRes.errorMessage || 'Voice generation failed');
 
-        const voiceSize = fs.existsSync(voiceMp3Path) ? fs.statSync(voiceMp3Path).size : 0;
-        const duration = voiceRes.data?.duration || 20;
-        this.logger.info(`Voice generated: ${voiceSize} bytes, ~${duration}s`);
+        // Sync latest take to root voice.mp3 for pipeline compatibility
+        fs.copyFileSync(targetVoiceFile, rootVoiceFile);
 
-        // Recalibrate master.json scene durations to match exact audio narration length + 0.8s buffer padding (capped at 29.5s max)
+        const duration = voiceRes.data?.duration || 20;
+
+        const voiceLabelMap: Record<string, string> = {
+          'custom1': 'custom profile 1',
+          'custom2': 'custom profile 2',
+          'default': 'master voice',
+          'newsroom_anchor': 'newsroom male anchor',
+          'storyteller_expressive': 'expressive storyteller',
+          'financial_analyst': 'financial analyst',
+          'am_adam': 'adam deep male',
+          'am_michael': 'michael news anchor',
+          'bm_george': 'george british male',
+          'af_heart': 'heart female narrator',
+          'af_bella': 'bella female dynamic',
+          'af_sarah': 'sarah female professional',
+          'bf_emma': 'emma british female',
+          'pNInz6obpgDQGcFmaJgB': 'adam elevenlabs',
+          'onwK4e9ZLuTAKqWW03F9': 'michael elevenlabs',
+          '21m00Tcm4TlvDq8ikWAM': 'rachel elevenlabs'
+        };
+
+        const formatProvider = provider === 'chatterbox' ? 'chatterbox' : provider === 'kokoro' ? 'tts kokoro' : provider || 'tts';
+        const formatVoiceLabel = (voiceName && voiceLabelMap[voiceName]) || voiceName || 'master voice';
+
+        const newHistoryItem = {
+          id: nextId,
+          fileName: `${nextId}.mp3`,
+          audioUrl: `/api/runs/${runId}/file/voices/${nextId}.mp3?t=${Date.now()}`,
+          provider: formatProvider,
+          rawProvider: provider,
+          voiceName: voiceName || 'default',
+          voiceLabel: formatVoiceLabel,
+          speed: ttsSpeed || 1.15,
+          exaggeration: exaggeration !== undefined ? exaggeration : 0.50,
+          cfgWeight: cfgWeight !== undefined ? cfgWeight : 0.70,
+          temperature: temperature !== undefined ? temperature : 0.80,
+          repetitionPenalty: repetitionPenalty !== undefined ? repetitionPenalty : 1.20,
+          topP: topP !== undefined ? topP : 1.00,
+          stability: stability !== undefined ? stability : 0.50,
+          similarityBoost: similarityBoost !== undefined ? similarityBoost : 0.75,
+          style: style !== undefined ? style : 0.00,
+          useSpeakerBoost: useSpeakerBoost !== undefined ? useSpeakerBoost : true,
+          applyTextNormalization: applyTextNormalization || 'auto',
+          duration: duration,
+          timestamp: new Date().toISOString(),
+          active: true
+        };
+
+        history.forEach((h: any) => (h.active = false));
+        history.unshift(newHistoryItem);
+        fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf-8');
+
+        // Recalibrate master.json scene durations
         const masterPath = this.storageService.getFilePath(runDir, 'master.json');
         if (fs.existsSync(masterPath)) {
           try {
@@ -186,7 +296,6 @@ export class PipelineOrchestrator {
                 masterData.scenes[lastIdx].durationSeconds = (masterData.scenes[lastIdx].durationSeconds || 5) + extraSec;
                 masterData.totalDuration = targetVideoDur;
                 this.storageService.saveJson(runDir, 'master.json', masterData);
-                this.logger.info(`Recalibrated final scene duration (+${extraSec}s padding) to match voice narration (${targetVideoDur}s total)`);
               }
             }
           } catch (e) {}
@@ -194,11 +303,11 @@ export class PipelineOrchestrator {
 
         if (this.wizardState) {
           this.wizardState.currentStep = 3;
-          this.wizardState.voicePath = voiceMp3Path;
+          this.wizardState.voicePath = targetVoiceFile;
           this.wizardState.voiceDuration = duration;
         }
 
-        return { audioUrl: `/api/runs/${runId}/file/voice.mp3`, duration };
+        return { audioUrl: newHistoryItem.audioUrl, duration, history };
       } finally {
         this.activeVoiceGenerations.delete(runId);
       }
@@ -207,14 +316,61 @@ export class PipelineOrchestrator {
     return taskPromise;
   }
 
+  public async wizardStep3_GetVoiceHistory(runId: string): Promise<{ history: any[] }> {
+    const runDir = this.storageService.getRunDir(runId);
+    const historyPath = path.join(runDir, 'voices', 'history.json');
+    if (fs.existsSync(historyPath)) {
+      try {
+        const history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
+        return { history };
+      } catch (e) {}
+    }
+    return { history: [] };
+  }
+
+  public async wizardStep3_SelectVoiceTake(runId: string, takeId: number): Promise<{ success: boolean; activeAudioUrl: string; activeItem: any; history: any[] }> {
+    const runDir = this.storageService.getRunDir(runId);
+    const voicesDir = path.join(runDir, 'voices');
+    const targetFile = path.join(voicesDir, `${takeId}.mp3`);
+    const rootVoiceFile = this.storageService.getFilePath(runDir, 'voice.mp3');
+
+    if (!fs.existsSync(targetFile)) throw new Error(`Voice take ${takeId}.mp3 not found`);
+    fs.copyFileSync(targetFile, rootVoiceFile);
+
+    const historyPath = path.join(voicesDir, 'history.json');
+    let history: any[] = [];
+    if (fs.existsSync(historyPath)) {
+      try {
+        history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
+      } catch (e) {}
+    }
+
+    history.forEach((h: any) => {
+      h.active = (h.id === takeId);
+    });
+
+    fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf-8');
+    const activeItem = history.find((h: any) => h.id === takeId);
+
+    return {
+      success: true,
+      activeAudioUrl: `/api/runs/${runId}/file/voices/${takeId}.mp3?t=${Date.now()}`,
+      activeItem,
+      history
+    };
+  }
+
   // ========================================================================
-  //  WIZARD STEP 4: Download / Generate clips for all scenes (Pexels / LTX-Video)
+  //  WIZARD STEP 4: Download / Generate clips for all scenes (Pexels / ComfyUI / MuAPI)
   // ========================================================================
   public async wizardStep4_Clips(
     masterPlan: MasterPlan,
     runId: string,
-    provider: 'pexels' | 'ltx' = 'pexels',
-    customPrompts?: Record<number, string>
+    provider: 'pexels' | 'comfyui' | 'muapi' | 'apicalls' | 'dropclips' | 'localmodelshop' | 'wan2gp' = 'pexels',
+    customPrompts?: Record<number, string>,
+    muapiModel: string = 'muapi/wan3.0-text-to-video',
+    comfyModel: string = 'ltx-video',
+    localModel: string = 'Wan2.1/Text2video 1.3B/NVFP4 Lightx2v 4-step'
   ): Promise<{ clips: Array<{ sceneNumber: number; clipUrl: string; searchKeyword: string; status: string }> }> {
     const runDir = this.storageService.getRunDir(runId);
     this.logger.info(`📹 Wizard Step 4: Generating video clips (${provider}) for ${runId}`);
@@ -228,28 +384,129 @@ export class PipelineOrchestrator {
     const clips: Array<{ sceneNumber: number; clipUrl: string; searchKeyword: string; status: string }> = [];
 
     for (const scene of masterPlan.scenes) {
-      const userPrompt = customPrompts?.[scene.sceneNumber] || scene.videoPrompt || scene.searchKeyword || scene.visualPrompt || 'business corporate';
+      const dynamicKw = (scene.narrationText || '').toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 3).slice(0, 4).join(' ');
+      const userPrompt = customPrompts?.[scene.sceneNumber] || scene.videoPrompt || scene.visualPrompt || scene.searchKeyword || dynamicKw || 'news broadcast';
+      const sceneClipPath = path.join(clipsDir, `scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`);
 
-      if (provider === 'ltx') {
-        // LTX-Video Baseplate Generator (creates baseplate video ready for LTX model pipeline)
-        const sceneClipPath = path.join(clipsDir, `scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`);
-        if (!fs.existsSync(sceneClipPath) || fs.statSync(sceneClipPath).size < 1000) {
-          const pexelsRes = await this.videoService.generateSceneClip(scene, clipsDir, userPrompt);
-          if (!pexelsRes.success) {
-            try {
-              const escText = userPrompt.replace(/'/g, '').slice(0, 30);
-              const cmd = `ffmpeg -y -f lavfi -i color=c=0x0f172a:s=1080x1920:d=${scene.durationSeconds || 5} -vf "drawtext=text='LTX AI Scene ${scene.sceneNumber} (${escText})':fontcolor=white:fontsize=36:x=(w-text_w)/2:y=(h-text_h)/2" -c:v libx264 -pix_fmt yuv420p "${sceneClipPath.replace(/\\/g, '/')}"`;
-              await execAsync(cmd);
-            } catch (e) {}
-          }
-        }
-
+      if (provider === 'dropclips') {
+        const exists = fs.existsSync(sceneClipPath);
         clips.push({
           sceneNumber: scene.sceneNumber,
-          clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+          clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4?t=${Date.now()}`,
           searchKeyword: userPrompt,
-          status: 'completed',
+          status: exists ? 'completed' : 'pending',
         });
+      } else if (provider === 'localmodelshop' || provider === 'wan2gp') {
+        const sceneClipPath = path.join(clipsDir, `scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`);
+        try {
+          this.logger.info(`🐉 Generating Local AI video clip via Wan2GP (${localModel}) for Scene ${scene.sceneNumber}...`);
+          const wanRes = await this.wanGPService.generateVideoClip({
+            prompt: userPrompt,
+            outputPath: sceneClipPath,
+            resolution: '480x832',
+            numInferenceSteps: 4,
+          });
+
+          clips.push({
+            sceneNumber: scene.sceneNumber,
+            clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+            searchKeyword: userPrompt,
+            status: wanRes.success ? 'completed' : 'failed',
+          });
+        } catch (err: any) {
+          this.logger.error(`❌ Wan2GP local generation error for Scene ${scene.sceneNumber}: ${err.message}`);
+          const pexelsRes = await this.videoService.generateSceneClip(scene, clipsDir, userPrompt);
+          clips.push({
+            sceneNumber: scene.sceneNumber,
+            clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+            searchKeyword: userPrompt,
+            status: pexelsRes.success ? 'completed' : 'failed',
+          });
+        }
+      } else if (provider === 'muapi' || provider === 'apicalls') {
+        const sceneClipPath = path.join(clipsDir, `scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`);
+        const modelLower = muapiModel.toLowerCase();
+
+        if (modelLower.startsWith('vadoo/')) {
+          try {
+            this.logger.info(`🎬 Generating Cloud AI video clip via Vadoo AI (${muapiModel}) for Scene ${scene.sceneNumber}...`);
+            const vadooRes = await this.vadooService.generateVideoClip({
+              topic: userPrompt,
+              outputPath: sceneClipPath,
+            });
+
+            clips.push({
+              sceneNumber: scene.sceneNumber,
+              clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+              searchKeyword: userPrompt,
+              status: vadooRes.success ? 'completed' : 'failed',
+            });
+          } catch (err: any) {
+            this.logger.error(`❌ Vadoo AI synthesis error for Scene ${scene.sceneNumber}: ${err.message}`);
+            const pexelsRes = await this.videoService.generateSceneClip(scene, clipsDir, userPrompt);
+            clips.push({
+              sceneNumber: scene.sceneNumber,
+              clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+              searchKeyword: userPrompt,
+              status: pexelsRes.success ? 'completed' : 'failed',
+            });
+          }
+        } else {
+          // Default MuAPI cloud model handler
+          const cleanModelName = muapiModel.includes('/') ? muapiModel.split('/')[1] : muapiModel;
+          try {
+            this.logger.info(`☁️ Generating Cloud AI video clip via MuAPI (${cleanModelName}) for Scene ${scene.sceneNumber}...`);
+            const muRes = await this.muAPIService.generateVideoClip({
+              prompt: userPrompt,
+              outputPath: sceneClipPath,
+              modelName: cleanModelName,
+            });
+
+            clips.push({
+              sceneNumber: scene.sceneNumber,
+              clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+              searchKeyword: userPrompt,
+              status: muRes.success ? 'completed' : 'failed',
+            });
+          } catch (err: any) {
+            this.logger.error(`❌ MuAPI synthesis error for Scene ${scene.sceneNumber}: ${err.message}`);
+            const pexelsRes = await this.videoService.generateSceneClip(scene, clipsDir, userPrompt);
+            clips.push({
+              sceneNumber: scene.sceneNumber,
+              clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+              searchKeyword: userPrompt,
+              status: pexelsRes.success ? 'completed' : 'failed',
+            });
+          }
+        }
+      } else if (provider === 'comfyui') {
+        const sceneClipPath = path.join(clipsDir, `scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`);
+        try {
+          this.logger.info(`🎨 Generating AI video clip via ComfyUI (${comfyModel}) for Scene ${scene.sceneNumber}...`);
+          await this.comfyUIService.generateVideoClip({
+            prompt: userPrompt,
+            outputPath: sceneClipPath,
+            model: comfyModel,
+            height: 768,
+            width: 512,
+            numFrames: Math.min(121, Math.max(49, Math.round((scene.durationSeconds || 5) * 24))),
+          });
+          clips.push({
+            sceneNumber: scene.sceneNumber,
+            clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+            searchKeyword: userPrompt,
+            status: 'completed',
+          });
+        } catch (err: any) {
+          this.logger.error(`❌ ComfyUI synthesis error for Scene ${scene.sceneNumber}: ${err.message}`);
+          const pexelsRes = await this.videoService.generateSceneClip(scene, clipsDir, userPrompt);
+          clips.push({
+            sceneNumber: scene.sceneNumber,
+            clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
+            searchKeyword: userPrompt,
+            status: pexelsRes.success ? 'completed' : 'failed',
+          });
+        }
       } else {
         // Pexels Stock Video Downloader
         const res = await this.videoService.generateSceneClip(scene, clipsDir, userPrompt);
@@ -302,6 +559,37 @@ export class PipelineOrchestrator {
       clipUrl: clipUrl + `?t=${Date.now()}`, // cache-bust
       status: res.success ? 'completed' : 'failed',
     };
+  }
+
+  // ========================================================================
+  //  WIZARD STEP 4c: Upload / Copy a custom dropped clip file for a scene
+  // ========================================================================
+  public async wizardStep4_UploadClip(
+    sceneNumber: number,
+    runId: string,
+    base64Data?: string,
+    sourceFilePath?: string
+  ): Promise<{ success: boolean; clipUrl: string }> {
+    const runDir = this.storageService.getRunDir(runId);
+    const clipsDir = this.storageService.getFilePath(runDir, 'clips');
+    if (!fs.existsSync(clipsDir)) fs.mkdirSync(clipsDir, { recursive: true });
+
+    const targetPath = path.join(clipsDir, `scene_${String(sceneNumber).padStart(2, '0')}.mp4`);
+
+    if (sourceFilePath && fs.existsSync(sourceFilePath)) {
+      this.logger.info(`📁 Copying dropped clip file from "${sourceFilePath}" -> "${targetPath}"`);
+      fs.copyFileSync(sourceFilePath, targetPath);
+    } else if (base64Data) {
+      this.logger.info(`📁 Saving uploaded clip file for Scene ${sceneNumber}...`);
+      const cleanBase64 = base64Data.replace(/^data:video\/\w+;base64,/, '');
+      const buffer = Buffer.from(cleanBase64, 'base64');
+      fs.writeFileSync(targetPath, buffer);
+    } else {
+      throw new Error('No valid file data or source file path provided');
+    }
+
+    const clipUrl = `/api/runs/${runId}/file/clips/scene_${String(sceneNumber).padStart(2, '0')}.mp4?t=${Date.now()}`;
+    return { success: true, clipUrl };
   }
 
   // ========================================================================

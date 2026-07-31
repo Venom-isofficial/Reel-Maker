@@ -29,6 +29,8 @@ export class SettingsService {
       pexelsApiKey: process.env.PEXELS_API_KEY || '',
       whisperApiKey: process.env.WHISPER_API_KEY || '',
       elevenLabsApiKey: process.env.ELEVENLABS_API_KEY || '',
+      muapiApiKey: process.env.MUAPI_API_KEY || '1bd8f8630d432391c79ba1acb6cf5510e648b228179ea4693523178aad6801e9',
+      vadooApiKey: process.env.VADOO_API_KEY || '2GmLXthKf1MYmPX33jET1Izns06fUZlExpRoOJoa5BQ',
       ttsProvider: process.env.TTS_PROVIDER || 'kokoro',
       kokoroVoice: process.env.KOKORO_VOICE || 'am_michael',
       whisperDevice: process.env.WHISPER_DEVICE || 'cuda',

@@ -21,7 +21,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
 
 // Services initialization
 const settingsService = new SettingsService();
@@ -76,7 +76,7 @@ app.post('/api/wizard/step2-scenes', async (req, res) => {
 // Step 3: Generate voice TTS
 app.post('/api/wizard/step3-voice', async (req, res) => {
   try {
-    const { scriptText, runId, voiceName, provider, elevenLabsApiKey, ttsSpeed, exaggeration, cfgWeight } = req.body;
+    const { scriptText, runId, voiceName, provider, elevenLabsApiKey, ttsSpeed, exaggeration, cfgWeight, temperature, repetitionPenalty, topP, stability, similarityBoost, style, useSpeakerBoost, applyTextNormalization } = req.body;
     if (!scriptText || !runId) return res.status(400).json({ success: false, message: 'scriptText and runId required' });
     const result = await orchestrator.wizardStep3_Voice(
       scriptText,
@@ -86,9 +86,40 @@ app.post('/api/wizard/step3-voice', async (req, res) => {
       elevenLabsApiKey,
       ttsSpeed ? parseFloat(ttsSpeed) : undefined,
       exaggeration ? parseFloat(exaggeration) : undefined,
-      cfgWeight ? parseFloat(cfgWeight) : undefined
+      cfgWeight ? parseFloat(cfgWeight) : undefined,
+      temperature ? parseFloat(temperature) : undefined,
+      repetitionPenalty ? parseFloat(repetitionPenalty) : undefined,
+      topP ? parseFloat(topP) : undefined,
+      stability !== undefined ? parseFloat(stability) : undefined,
+      similarityBoost !== undefined ? parseFloat(similarityBoost) : undefined,
+      style !== undefined ? parseFloat(style) : undefined,
+      useSpeakerBoost !== undefined ? Boolean(useSpeakerBoost) : undefined,
+      applyTextNormalization
     );
     res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// Step 3b: Get voice history for runId
+app.get('/api/wizard/step3-voice-history/:runId', async (req, res) => {
+  try {
+    const { runId } = req.params;
+    const result = await orchestrator.wizardStep3_GetVoiceHistory(runId);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// Step 3c: Select an active voice take from history
+app.post('/api/wizard/step3-select-voice', async (req, res) => {
+  try {
+    const { runId, takeId } = req.body;
+    if (!runId || !takeId) return res.status(400).json({ success: false, message: 'runId and takeId required' });
+    const result = await orchestrator.wizardStep3_SelectVoiceTake(runId, parseInt(takeId));
+    res.json(result);
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
   }
@@ -97,9 +128,18 @@ app.post('/api/wizard/step3-voice', async (req, res) => {
 // Step 4: Generate all clips
 app.post('/api/wizard/step4-clips', async (req, res) => {
   try {
-    const { masterPlan, runId, provider, prompts } = req.body;
+    const { masterPlan, runId, provider, prompts, muapiModel, apiModel, comfyModel, localModel } = req.body;
     if (!masterPlan || !runId) return res.status(400).json({ success: false, message: 'masterPlan and runId required' });
-    const result = await orchestrator.wizardStep4_Clips(masterPlan, runId, provider || 'pexels', prompts);
+    const selectedModel = apiModel || muapiModel || 'muapi/wan3.0-text-to-video';
+    const result = await orchestrator.wizardStep4_Clips(
+      masterPlan,
+      runId,
+      provider || 'pexels',
+      prompts,
+      selectedModel,
+      comfyModel || 'ltx-video',
+      localModel || 'Wan2.1/Text2video 1.3B/NVFP4 Lightx2v 4-step'
+    );
     res.json({ success: true, ...result });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
@@ -113,6 +153,18 @@ app.post('/api/wizard/step4-regen-clip', async (req, res) => {
     if (!sceneNumber || !runId) return res.status(400).json({ success: false, message: 'sceneNumber and runId required' });
     const result = await orchestrator.wizardStep4_RegenClip(sceneNumber, searchKeyword || 'business', durationSeconds || 5, runId);
     res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// Step 4c: Upload or copy a clip file for a scene
+app.post('/api/wizard/step4-upload-clip', async (req, res) => {
+  try {
+    const { sceneNumber, runId, fileData, filePath } = req.body;
+    if (!sceneNumber || !runId) return res.status(400).json({ success: false, message: 'sceneNumber and runId required' });
+    const result = await orchestrator.wizardStep4_UploadClip(sceneNumber, runId, fileData, filePath);
+    res.json(result);
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
   }

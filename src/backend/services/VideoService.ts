@@ -86,8 +86,9 @@ export class VideoService {
     const rawTempPath = path.join(clipsDir, `raw_scene_${scene.sceneNumber}.mp4`);
     const duration = scene.durationSeconds || 5;
 
-    // Use Gemini-generated keyword for Pexels search
-    const query = (searchKeyword || scene.searchKeyword || 'business corporate').trim();
+    // Use Gemini-generated keyword or narration text for Pexels search
+    const dynamicKw = (scene.narrationText || scene.videoPrompt || '').toLowerCase().replace(/[^\w\s]/g, '').split(/\s+/).filter(w => w.length > 3).slice(0, 3).join(' ');
+    const query = (searchKeyword || scene.searchKeyword || dynamicKw || 'news broadcast').trim();
 
     try {
       if (!fs.existsSync(clipsDir)) {
