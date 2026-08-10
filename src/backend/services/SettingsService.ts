@@ -25,6 +25,10 @@ export class SettingsService {
 
     return {
       finnhubApiKey: process.env.FINNHUB_API_KEY || '',
+      marketauxApiKey: process.env.MARKETAUX_API_KEY || 'HC2frmeEAmHQdKbR6xpzcfPgEc3yrkKfc2l47o2J',
+      alphavantageApiKey: process.env.ALPHAVANTAGE_API_KEY || 'SFVEPBJN5VEQJD3E',
+      benzingaApiKey: process.env.BENZINGA_API_KEY || 'bz.DAHUHM6A22IB6N2DBYBPSGEW5342FMLW',
+      newsSource: process.env.NEWS_SOURCE || 'marketaux',
       geminiApiKey: process.env.GEMINI_API_KEY || '',
       pexelsApiKey: process.env.PEXELS_API_KEY || '',
       whisperApiKey: process.env.WHISPER_API_KEY || '',
@@ -54,6 +58,10 @@ export class SettingsService {
     
     // Also update process.env for runtime services
     if (updated.finnhubApiKey !== undefined) process.env.FINNHUB_API_KEY = updated.finnhubApiKey;
+    if (updated.marketauxApiKey !== undefined) process.env.MARKETAUX_API_KEY = updated.marketauxApiKey;
+    if (updated.alphavantageApiKey !== undefined) process.env.ALPHAVANTAGE_API_KEY = updated.alphavantageApiKey;
+    if (updated.benzingaApiKey !== undefined) process.env.BENZINGA_API_KEY = updated.benzingaApiKey;
+    if (updated.newsSource !== undefined) process.env.NEWS_SOURCE = updated.newsSource;
     if (updated.geminiApiKey !== undefined) process.env.GEMINI_API_KEY = updated.geminiApiKey;
     if (updated.pexelsApiKey !== undefined) process.env.PEXELS_API_KEY = updated.pexelsApiKey;
     if (updated.whisperApiKey !== undefined) process.env.WHISPER_API_KEY = updated.whisperApiKey;

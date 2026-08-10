@@ -95,6 +95,7 @@ def health_check():
 
 def resolve_audio_prompt(voice_preset: str) -> str | None:
     samples_base = os.path.abspath(os.path.join(os.path.dirname(__file__), "models", "ChatterboxTrainingAudioSamples"))
+    vox2_base = os.path.abspath(os.path.join(os.path.dirname(__file__), "models", "ChatterboxVox2Samples"))
     candidates = [voice_preset]
     if voice_preset in ["default", "master"]:
         candidates.extend(["default", "master"])
@@ -102,37 +103,42 @@ def resolve_audio_prompt(voice_preset: str) -> str | None:
         raw_num = voice_preset.replace("custom", "")
         candidates.extend([raw_num, f"custom_{raw_num}", f"profile_{raw_num}"])
     
+    search_dirs = [samples_base]
+    if os.path.exists(vox2_base):
+        search_dirs.append(vox2_base)
+
     for cand in candidates:
         if not cand:
             continue
-        profile_dir = os.path.join(samples_base, cand)
-        if os.path.isdir(profile_dir):
-            ref_wav = os.path.join(profile_dir, "reference.wav")
-            audio_files = [
-                os.path.join(profile_dir, f) for f in os.listdir(profile_dir)
-                if f.lower().endswith(('.mp3', '.wav', '.m4a', '.flac', '.ogg')) and f != "reference.wav"
-            ]
-            
-            need_rebuild = not os.path.exists(ref_wav)
-            if not need_rebuild and audio_files:
-                ref_mtime = os.path.getmtime(ref_wav)
-                if any(os.path.getmtime(af) > ref_mtime for af in audio_files):
-                    need_rebuild = True
+        for base in search_dirs:
+            profile_dir = os.path.join(base, cand)
+            if os.path.isdir(profile_dir):
+                ref_wav = os.path.join(profile_dir, "reference.wav")
+                audio_files = [
+                    os.path.join(profile_dir, f) for f in os.listdir(profile_dir)
+                    if f.lower().endswith(('.mp3', '.wav', '.m4a', '.flac', '.ogg')) and f != "reference.wav"
+                ]
+                
+                need_rebuild = not os.path.exists(ref_wav)
+                if not need_rebuild and audio_files:
+                    ref_mtime = os.path.getmtime(ref_wav)
+                    if any(os.path.getmtime(af) > ref_mtime for af in audio_files):
+                        need_rebuild = True
 
-            if need_rebuild and audio_files:
-                try:
-                    print(f"🎙️ Rebuilding 10s normalized reference audio for '{cand}' from {len(audio_files)} sample files...")
-                    first_audio = audio_files[0]
-                    cmd = ["ffmpeg", "-y", "-i", first_audio, "-ss", "0", "-t", "10", "-af", "loudnorm", "-ar", "24000", "-ac", "1", ref_wav]
-                    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                except Exception as e:
-                    print(f"Warning: Could not build reference.wav for profile {cand}: {e}")
+                if need_rebuild and audio_files:
+                    try:
+                        print(f"🎙️ Rebuilding 10s normalized reference audio for '{cand}' from {len(audio_files)} sample files...")
+                        first_audio = audio_files[0]
+                        cmd = ["ffmpeg", "-y", "-i", first_audio, "-ss", "0", "-t", "10", "-af", "loudnorm", "-ar", "24000", "-ac", "1", ref_wav]
+                        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    except Exception as e:
+                        print(f"Warning: Could not build reference.wav for profile {cand}: {e}")
+                        return audio_files[0]
+
+                if os.path.exists(ref_wav):
+                    return ref_wav
+                elif audio_files:
                     return audio_files[0]
-
-            if os.path.exists(ref_wav):
-                return ref_wav
-            elif audio_files:
-                return audio_files[0]
     return None
 
 @app.post("/synthesize")
@@ -155,7 +161,8 @@ def synthesize(req: SynthesizeRequest):
             try:
                 model_instance.prepare_conditionals(audio_prompt, exaggeration=req.exaggeration)
             except Exception as cond_err:
-                print(f"Warning: Failed to prepare conditionals directly: {cond_err}")
+                print(f"Error: Failed to prepare conditionals for preset '{req.voice_preset}': {cond_err}")
+                raise HTTPException(status_code=400, detail=f"Failed to prepare conditionals for preset '{req.voice_preset}': {cond_err}")
         else:
             print(f"⚠️ [VOICE WARNING] No custom reference audio found for preset '{req.voice_preset}', using default speaker embedding.")
         
@@ -179,13 +186,23 @@ def synthesize(req: SynthesizeRequest):
         if audio_prompt:
             gen_kwargs["audio_prompt_path"] = audio_prompt
 
-        # Execute Chatterbox inference
-        if hasattr(model_instance, "generate"):
-            wav_bytes = model_instance.generate(**gen_kwargs)
-        elif hasattr(model_instance, "tts"):
-            wav_bytes = model_instance.tts(**gen_kwargs)
-        else:
-            wav_bytes = model_instance(req.text)
+        # Execute Chatterbox inference with GPU FP16 AMP & no_grad speedup
+        with torch.no_grad():
+            if torch.cuda.is_available():
+                with torch.cuda.amp.autocast(dtype=torch.float16):
+                    if hasattr(model_instance, "generate"):
+                        wav_bytes = model_instance.generate(**gen_kwargs)
+                    elif hasattr(model_instance, "tts"):
+                        wav_bytes = model_instance.tts(**gen_kwargs)
+                    else:
+                        wav_bytes = model_instance(req.text)
+            else:
+                if hasattr(model_instance, "generate"):
+                    wav_bytes = model_instance.generate(**gen_kwargs)
+                elif hasattr(model_instance, "tts"):
+                    wav_bytes = model_instance.tts(**gen_kwargs)
+                else:
+                    wav_bytes = model_instance(req.text)
 
         # Handle tensor or array outputs
         import torchaudio
@@ -225,7 +242,16 @@ def synthesize(req: SynthesizeRequest):
 
     except Exception as err:
         print(f"Error during Chatterbox inference: {err}")
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            import gc; gc.collect()
         raise HTTPException(status_code=500, detail=str(err))
+    finally:
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.empty_cache()
+                import gc; gc.collect()
+            except Exception: pass
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

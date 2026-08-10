@@ -26,13 +26,17 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
   const [regenLoading, setRegenLoading] = useState<Record<number, boolean>>({});
   const [uploadLoading, setUploadLoading] = useState<Record<number, boolean>>({});
   const [prompts, setPrompts] = useState<Record<number, string>>({});
+  const [sceneStartSec, setSceneStartSec] = useState<Record<number, number>>({});
+  const [sceneDurations, setSceneDurations] = useState<Record<number, number>>({});
 
   const fileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
-  // Initialize scene prompts on mount
+  // Initialize scene prompts & trim durations on mount
   useEffect(() => {
     const initialPrompts: Record<number, string> = {};
     const initialClips: ClipItem[] = [];
+    const initialStartSec: Record<number, number> = {};
+    const initialDurations: Record<number, number> = {};
 
     (masterPlan.scenes || []).forEach((scene) => {
       const extractKeywords = (txt: string) => {
@@ -47,6 +51,9 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
       const promptValue = scene.videoPrompt || scene.visualPrompt || sceneKw || 'news broadcast footage';
 
       initialPrompts[scene.sceneNumber] = promptValue;
+      initialStartSec[scene.sceneNumber] = scene.startSec || 0;
+      initialDurations[scene.sceneNumber] = scene.durationSeconds || 5;
+
       initialClips.push({
         sceneNumber: scene.sceneNumber,
         clipUrl: `/api/runs/${runId}/file/clips/scene_${String(scene.sceneNumber).padStart(2, '0')}.mp4`,
@@ -57,6 +64,8 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
 
     setPrompts(initialPrompts);
     setClips(initialClips);
+    setSceneStartSec(initialStartSec);
+    setSceneDurations(initialDurations);
 
     // Check if clips already exist on disk for each scene
     (masterPlan.scenes || []).forEach((scene) => {
@@ -71,6 +80,67 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
         .catch(() => {});
     });
   }, [masterPlan, runId]);
+
+  const handleStartSecChange = (sceneNumber: number, startVal: number) => {
+    const val = Math.max(0, startVal);
+    setSceneStartSec((prev) => ({ ...prev, [sceneNumber]: val }));
+
+    const updatedScenes = (masterPlan.scenes || []).map((s) =>
+      s.sceneNumber === sceneNumber ? { ...s, startSec: val } : s
+    );
+    masterPlan.scenes = updatedScenes;
+
+    fetch('/api/wizard/save-edits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId, field: 'masterPlan', data: masterPlan }),
+    }).catch(() => {});
+  };
+
+  const handleDurationChange = (sceneNumber: number, durVal: number) => {
+    const val = Math.max(0.5, durVal);
+    setSceneDurations((prev) => ({ ...prev, [sceneNumber]: val }));
+
+    const updatedScenes = (masterPlan.scenes || []).map((s) =>
+      s.sceneNumber === sceneNumber ? { ...s, durationSeconds: val } : s
+    );
+    masterPlan.scenes = updatedScenes;
+
+    fetch('/api/wizard/save-edits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runId, field: 'masterPlan', data: masterPlan }),
+    }).catch(() => {});
+  };
+
+  const applyClipTrim = async (sceneNumber: number) => {
+    const startSec = sceneStartSec[sceneNumber] || 0;
+    const durationSeconds = sceneDurations[sceneNumber] || 5;
+
+    const currentClip = clips.find((c) => c.sceneNumber === sceneNumber);
+    if (!currentClip || currentClip.status !== 'completed') return;
+
+    setUploadLoading((prev) => ({ ...prev, [sceneNumber]: true }));
+    try {
+      const res = await fetch('/api/wizard/step4-trim-clip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sceneNumber, runId, startSec, durationSeconds }),
+      });
+      const data = await res.json();
+      if (data.success && data.clipUrl) {
+        setClips((prev) =>
+          prev.map((c) =>
+            c.sceneNumber === sceneNumber ? { ...c, clipUrl: data.clipUrl, status: 'completed' } : c
+          )
+        );
+      }
+    } catch (e) {
+      console.error('Failed to trim clip:', e);
+    } finally {
+      setUploadLoading((prev) => ({ ...prev, [sceneNumber]: false }));
+    }
+  };
 
   const handleFileUpload = (sceneNumber: number, file: File) => {
     setUploadLoading((prev) => ({ ...prev, [sceneNumber]: true }));
@@ -89,6 +159,17 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
             fileData,
           }),
         });
+
+        const contentType = res.headers.get('content-type') || '';
+        if (!res.ok || !contentType.includes('application/json')) {
+          const text = await res.text();
+          throw new Error(
+            res.status === 413
+              ? 'File size exceeds maximum upload limit (500MB). Please select a smaller file.'
+              : `Upload failed (Status ${res.status}): ${text.slice(0, 100)}`
+          );
+        }
+
         const data = await res.json();
         if (!data.success) throw new Error(data.message || 'Clip upload failed');
 
@@ -100,7 +181,7 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
           )
         );
       } catch (err: any) {
-        setError(err.message || 'Failed to upload video clip');
+        setError(err.message || 'Failed to upload clip or image');
       } finally {
         setUploadLoading((prev) => ({ ...prev, [sceneNumber]: false }));
       }
@@ -413,18 +494,50 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
                   </span>
                 </div>
 
-                {/* Top Badge: Duration & Status */}
-                <div className="absolute top-3 right-3 flex items-center gap-1.5 pointer-events-none">
-                  <span className="bg-black/80 backdrop-blur px-2 py-1 rounded-lg border border-slate-800 text-[10px] font-mono text-slate-300">
-                    {scene.durationSeconds || 5}s
-                  </span>
+                {/* Top Badge: Interactive Start Sec & Play Duration Controls */}
+                <div
+                  className="absolute top-3 right-3 flex items-center gap-1.5 bg-black/90 backdrop-blur border border-slate-800 rounded-xl px-2 py-1 shadow-lg"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Start:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max="600"
+                      step="0.5"
+                      value={sceneStartSec[scene.sceneNumber] ?? 0}
+                      onChange={(e) => handleStartSecChange(scene.sceneNumber, parseFloat(e.target.value) || 0)}
+                      className="w-11 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[11px] text-cyan-300 font-mono font-bold text-center focus:outline-none focus:border-cyan-500"
+                      title="Start timestamp in video (seconds) - Applied in Final Render"
+                    />
+                    <span className="text-[10px] text-slate-500 font-mono">s</span>
+                  </div>
+
+                  <span className="text-slate-700 text-xs font-bold">|</span>
+
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Play:</span>
+                    <input
+                      type="number"
+                      min="0.5"
+                      max="120"
+                      step="0.5"
+                      value={sceneDurations[scene.sceneNumber] ?? 5}
+                      onChange={(e) => handleDurationChange(scene.sceneNumber, parseFloat(e.target.value) || 5)}
+                      className="w-11 bg-slate-900 border border-slate-700 rounded px-1 py-0.5 text-[11px] text-emerald-300 font-mono font-bold text-center focus:outline-none focus:border-emerald-500"
+                      title="Playback duration (seconds) - Applied in Final Render"
+                    />
+                    <span className="text-[10px] text-slate-500 font-mono">s</span>
+                  </div>
+
                   {clip.status === 'completed' ? (
-                    <div className="bg-emerald-950/80 border border-emerald-800/80 p-1 rounded-lg text-emerald-400">
-                      <CheckCircle className="w-3.5 h-3.5" />
+                    <div className="bg-emerald-950/80 border border-emerald-800/80 p-0.5 rounded text-emerald-400 ml-0.5">
+                      <CheckCircle className="w-3 h-3" />
                     </div>
                   ) : (
-                    <div className="bg-amber-950/80 border border-amber-800/80 p-1 rounded-lg text-amber-400">
-                      <AlertTriangle className="w-3.5 h-3.5" />
+                    <div className="bg-amber-950/80 border border-amber-800/80 p-0.5 rounded text-amber-400 ml-0.5">
+                      <AlertTriangle className="w-3 h-3" />
                     </div>
                   )}
                 </div>
@@ -437,9 +550,18 @@ export const WizardStep4_Clips: React.FC<Props> = ({ masterPlan, runId, onComple
                     <label className="block text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
                       {provider === 'comfyui' ? 'ComfyUI AI Video Prompt' : provider === 'dropclips' ? 'Scene Visual Prompt' : 'Pexels Search Query'}
                     </label>
-                    <span className="text-[10px] text-slate-500 italic line-clamp-1 max-w-[140px]">
-                      "{scene.narrationText?.slice(0, 20)}..."
-                    </span>
+                    <div className="relative group/tooltip">
+                      <span className="text-[10px] text-slate-400 italic line-clamp-1 max-w-[140px] cursor-help hover:text-cyan-300 transition">
+                        "{scene.narrationText?.slice(0, 20)}..."
+                      </span>
+                      {/* Full Narration Script Hover Card */}
+                      <div className="absolute right-0 top-5 z-50 hidden group-hover/tooltip:block w-72 p-3 bg-slate-950/95 border border-cyan-800/80 rounded-xl shadow-2xl text-xs text-slate-200 font-sans font-normal leading-relaxed backdrop-blur-md">
+                        <p className="text-[10px] font-bold text-cyan-400 uppercase tracking-wider mb-1 flex items-center gap-1">
+                          🎙️ Full Scene Narration Script:
+                        </p>
+                        "{scene.narrationText || 'No narration text for this scene.'}"
+                      </div>
+                    </div>
                   </div>
 
                   <textarea

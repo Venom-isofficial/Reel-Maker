@@ -1,5 +1,9 @@
 {
   "finnhubApiKey": "YOUR_FINNHUB_API_KEY",
+  "marketauxApiKey": "YOUR_MARKETAUX_API_KEY",
+  "alphavantageApiKey": "YOUR_ALPHAVANTAGE_API_KEY",
+  "benzingaApiKey": "YOUR_BENZINGA_API_KEY",
+  "newsSource": "marketaux",
   "geminiApiKey": "YOUR_GEMINI_API_KEY",
   "pexelsApiKey": "YOUR_PEXELS_API_KEY",
   "whisperApiKey": "YOUR_WHISPER_API_KEY",

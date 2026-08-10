@@ -16,16 +16,52 @@ export class RemotionService {
     const clipsDir = path.join(runDir, 'clips');
     const stitchedPath = path.join(clipsDir, 'stitched_video.mp4');
     const concatListPath = path.join(clipsDir, 'concat_list.txt');
+    const masterJsonPath = path.join(runDir, 'master.json');
 
     try {
       if (!fs.existsSync(clipsDir)) return null;
 
+      let masterPlan: any = null;
+      if (fs.existsSync(masterJsonPath)) {
+        try {
+          masterPlan = JSON.parse(fs.readFileSync(masterJsonPath, 'utf-8'));
+        } catch (e) {}
+      }
+
       const clipFiles: string[] = [];
+
       for (let i = 1; i <= sceneCount; i++) {
-        const clipName = `scene_${String(i).padStart(2, '0')}.mp4`;
-        const fullPath = path.join(clipsDir, clipName);
-        if (fs.existsSync(fullPath)) {
-          clipFiles.push(`file '${clipName}'`);
+        const sceneNumStr = String(i).padStart(2, '0');
+        const clipName = `scene_${sceneNumStr}.mp4`;
+        const rawClipName = `raw_scene_${i}.mp4`;
+        const trimmedClipName = `trimmed_scene_${sceneNumStr}.mp4`;
+
+        const fullClipPath = path.join(clipsDir, clipName);
+        const rawClipPath = path.join(clipsDir, rawClipName);
+
+        const sourcePath = fs.existsSync(rawClipPath) ? rawClipPath : fullClipPath;
+
+        if (fs.existsSync(sourcePath)) {
+          const sceneObj = (masterPlan?.scenes || []).find((s: any) => s.sceneNumber === i);
+          const startSec = Math.max(0, sceneObj?.startSec || 0);
+          const durationSeconds = Math.max(0.5, sceneObj?.durationSeconds || 5);
+
+          const trimmedPath = path.join(clipsDir, trimmedClipName);
+          console.log(`✂️ Final Render Trimming Scene ${i}: Start ${startSec}s, Play ${durationSeconds}s...`);
+
+          try {
+            const nvencTrimCmd = `ffmpeg -y -ss ${startSec} -i "${sourcePath.replace(/\\/g, '/')}" -t ${durationSeconds} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30" -c:v h264_nvenc -preset p4 -pix_fmt yuv420p -an "${trimmedPath.replace(/\\/g, '/')}"`;
+            await execAsync(nvencTrimCmd, { timeout: 30000 });
+          } catch (e) {
+            const libTrimCmd = `ffmpeg -y -ss ${startSec} -i "${sourcePath.replace(/\\/g, '/')}" -t ${durationSeconds} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -an "${trimmedPath.replace(/\\/g, '/')}"`;
+            await execAsync(libTrimCmd, { timeout: 30000 });
+          }
+
+          if (fs.existsSync(trimmedPath) && fs.statSync(trimmedPath).size > 10000) {
+            clipFiles.push(`file '${trimmedClipName}'`);
+          } else {
+            clipFiles.push(`file '${clipName}'`);
+          }
         }
       }
 

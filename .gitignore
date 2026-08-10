@@ -1,18 +1,25 @@
-# Dependencies
+# Dependencies & Package Managers
 node_modules/
 /.pnp
 .pnp.js
 
-# Testing & Cache
-.coverage
-.cache/
-*.log
-
-# Build Outputs
+# Build Outputs & Bundles
 dist/
 dist-ssr/
 build/
 *.tsbuildinfo
+.vite/
+
+# Python Cache & Virtual Environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.venv/
+env/
+venv/
+ENV/
 
 # Environment & Secrets
 .env
@@ -26,22 +33,49 @@ config/*.json
 settings.json
 *.json.secret
 
-# Project Generated Workspace & Renders
-/workspace/
-/python/models/*
-!/python/models/.gitkeep
-/scripts/models/*
-!/scripts/models/.gitkeep
-
-# Temporary test media files
+# Logs & Temporary Files
+/logs/
+*.log
+*.log.*
 test_*
+
+# Generated Output Renders & Temporary Workspaces
+/workspace/
+/output/
+/renders/
+/temp/
 *.mp4
 *.wav
 *.mp3
+*.gif
+*.png
+*.jpg
+*.jpeg
 *.json.bak
-*.log
 
-# IDE & OS files
+# Large AI Model Weights, Binary Datasets & Audio Samples
+/python/models/*
+!/python/models/.gitkeep
+/scripts/models/ChatterboxVox2Samples/
+/scripts/models/ChatterboxTrainingAudioSamples/
+/scripts/models/huggingface/
+/scripts/models/chatterbox/
+/scripts/models/OpenSLRModels/
+/scripts/models/temp_extracted/
+/scripts/models/*.tar
+/scripts/models/*.zip
+/scripts/models/*.onnx
+/scripts/models/*.bin
+
+# Track essential metadata CSV/JSON files inside scripts/models/
+!/scripts/models/vox1_meta.csv
+!/scripts/models/vox2_meta.csv
+!/scripts/models/identity_meta.csv
+!/scripts/models/vox2_master_index.json
+!/scripts/models/all_celebrities_master_mapping.csv
+!/scripts/models/starred_voices.json
+
+# IDE & OS Specific Files
 .vscode/
 .idea/
 *.suo

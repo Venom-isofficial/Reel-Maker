@@ -39,7 +39,7 @@ export class PipelineOrchestrator {
   private wizardState?: WizardState;
   private isRunning: boolean = false;
 
-  private activeVoiceGenerations: Map<string, Promise<{ audioUrl: string; duration: number; history: any[] }>> = new Map();
+  private activeVoiceGenerations: Map<string, Promise<{ audioUrl: string; duration: number }>> = new Map();
   private activeVideoRenders: Map<string, Promise<{ finalVideoUrl: string }>> = new Map();
 
   constructor(
@@ -80,7 +80,7 @@ export class PipelineOrchestrator {
   // ========================================================================
   //  WIZARD STEP 1: Fetch News → Analyze → Generate Script
   // ========================================================================
-  public async wizardStep1_Script(): Promise<{
+  public async wizardStep1_Script(newsSource?: 'finnhub' | 'marketaux' | 'alphavantage' | 'benzinga'): Promise<{
     article: NewsArticle;
     analysis: GeminiAnalysis;
     script: ScriptOutput;
@@ -96,10 +96,11 @@ export class PipelineOrchestrator {
       currentStep: 1,
     };
 
-    this.logger.info(`🚀 Wizard Step 1: Fetching news & generating script (${runId})`);
+    const selectedSource = newsSource || 'marketaux';
+    this.logger.info(`🚀 Wizard Step 1: Fetching news & generating script (${runId}) [Source: ${selectedSource}]`);
 
     // 1a. Fetch News
-    const newsRes = await this.newsService.fetchLatestFinanceArticle();
+    const newsRes = await this.newsService.fetchLatestFinanceArticle(selectedSource);
     if (!newsRes.success || !newsRes.data) throw new Error(newsRes.errorMessage || 'Failed to fetch news');
     this.storageService.saveJson(runDir, 'article.json', newsRes.data);
     this.logger.info(`Headline: "${newsRes.data.headline}"`);
@@ -167,20 +168,11 @@ export class PipelineOrchestrator {
     elevenLabsApiKey?: string,
     ttsSpeed?: number,
     exaggeration?: number,
-    cfgWeight?: number,
-    temperature?: number,
-    repetitionPenalty?: number,
-    topP?: number,
-    stability?: number,
-    similarityBoost?: number,
-    style?: number,
-    useSpeakerBoost?: boolean,
-    applyTextNormalization?: string
-  ): Promise<{ audioUrl: string; duration: number; history: any[] }> {
-    const lockKey = runId;
-    if (this.activeVoiceGenerations.has(lockKey)) {
-      this.logger.info(`⏳ Waiting for in-progress voice generation for run ${runId}...`);
-      return this.activeVoiceGenerations.get(lockKey)!;
+    cfgWeight?: number
+  ): Promise<{ audioUrl: string; duration: number }> {
+    if (this.activeVoiceGenerations.has(runId)) {
+      this.logger.info(`🎙️ Joining already active voice generation task for ${runId}`);
+      return this.activeVoiceGenerations.get(runId)!;
     }
 
     const taskPromise = (async () => {
@@ -188,101 +180,24 @@ export class PipelineOrchestrator {
         const runDir = this.storageService.getRunDir(runId);
         this.logger.info(`🎙️ Wizard Step 3: Generating voice audio (${provider || 'kokoro'}) for ${runId}`);
 
-        const voicesDir = path.join(runDir, 'voices');
-        if (!fs.existsSync(voicesDir)) {
-          fs.mkdirSync(voicesDir, { recursive: true });
-        }
-
-        const historyPath = path.join(voicesDir, 'history.json');
-        let history: any[] = [];
-        if (fs.existsSync(historyPath)) {
-          try {
-            history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
-          } catch (e) {
-            history = [];
-          }
-        }
-
-        const nextId = history.length > 0 ? Math.max(...history.map((h: any) => h.id || 0)) + 1 : 1;
-        const targetVoiceFile = path.join(voicesDir, `${nextId}.mp3`);
-        const rootVoiceFile = this.storageService.getFilePath(runDir, 'voice.mp3');
-
-        const voiceRes = await this.voiceService.generateVoice(
-          scriptText,
-          targetVoiceFile,
-          voiceName,
-          provider,
-          elevenLabsApiKey,
-          ttsSpeed,
-          exaggeration,
-          cfgWeight,
-          temperature,
-          repetitionPenalty,
-          topP,
-          stability,
-          similarityBoost,
-          style,
-          useSpeakerBoost,
-          applyTextNormalization
-        );
+        const voiceMp3Path = this.storageService.getFilePath(runDir, 'voice.mp3');
+        const voiceRes = await this.voiceService.generateVoice(scriptText, voiceMp3Path, voiceName, provider, elevenLabsApiKey, ttsSpeed, exaggeration, cfgWeight);
         if (!voiceRes.success) throw new Error(voiceRes.errorMessage || 'Voice generation failed');
 
-        // Sync latest take to root voice.mp3 for pipeline compatibility
-        fs.copyFileSync(targetVoiceFile, rootVoiceFile);
-
+        const voiceSize = fs.existsSync(voiceMp3Path) ? fs.statSync(voiceMp3Path).size : 0;
         const duration = voiceRes.data?.duration || 20;
+        const actualProvider = voiceRes.data?.provider || provider || 'kokoro';
+        this.logger.info(`Voice generated (${actualProvider}): ${voiceSize} bytes, ~${duration}s`);
 
-        const voiceLabelMap: Record<string, string> = {
-          'custom1': 'custom profile 1',
-          'custom2': 'custom profile 2',
-          'default': 'master voice',
-          'newsroom_anchor': 'newsroom male anchor',
-          'storyteller_expressive': 'expressive storyteller',
-          'financial_analyst': 'financial analyst',
-          'am_adam': 'adam deep male',
-          'am_michael': 'michael news anchor',
-          'bm_george': 'george british male',
-          'af_heart': 'heart female narrator',
-          'af_bella': 'bella female dynamic',
-          'af_sarah': 'sarah female professional',
-          'bf_emma': 'emma british female',
-          'pNInz6obpgDQGcFmaJgB': 'adam elevenlabs',
-          'onwK4e9ZLuTAKqWW03F9': 'michael elevenlabs',
-          '21m00Tcm4TlvDq8ikWAM': 'rachel elevenlabs'
-        };
+        // Save a sequential copy in runDir/takes/
+        const takesDir = path.join(runDir, 'takes');
+        if (!fs.existsSync(takesDir)) fs.mkdirSync(takesDir, { recursive: true });
+        const existingTakes = fs.readdirSync(takesDir).filter(f => f.startsWith('take_') && f.endsWith('.mp3'));
+        const takeNum = existingTakes.length + 1;
+        const takeFileName = `take_${String(takeNum).padStart(2, '0')}.mp3`;
+        fs.copyFileSync(voiceMp3Path, path.join(takesDir, takeFileName));
 
-        const formatProvider = provider === 'chatterbox' ? 'chatterbox' : provider === 'kokoro' ? 'tts kokoro' : provider || 'tts';
-        const formatVoiceLabel = (voiceName && voiceLabelMap[voiceName]) || voiceName || 'master voice';
-
-        const newHistoryItem = {
-          id: nextId,
-          fileName: `${nextId}.mp3`,
-          audioUrl: `/api/runs/${runId}/file/voices/${nextId}.mp3?t=${Date.now()}`,
-          provider: formatProvider,
-          rawProvider: provider,
-          voiceName: voiceName || 'default',
-          voiceLabel: formatVoiceLabel,
-          speed: ttsSpeed || 1.15,
-          exaggeration: exaggeration !== undefined ? exaggeration : 0.50,
-          cfgWeight: cfgWeight !== undefined ? cfgWeight : 0.70,
-          temperature: temperature !== undefined ? temperature : 0.80,
-          repetitionPenalty: repetitionPenalty !== undefined ? repetitionPenalty : 1.20,
-          topP: topP !== undefined ? topP : 1.00,
-          stability: stability !== undefined ? stability : 0.50,
-          similarityBoost: similarityBoost !== undefined ? similarityBoost : 0.75,
-          style: style !== undefined ? style : 0.00,
-          useSpeakerBoost: useSpeakerBoost !== undefined ? useSpeakerBoost : true,
-          applyTextNormalization: applyTextNormalization || 'auto',
-          duration: duration,
-          timestamp: new Date().toISOString(),
-          active: true
-        };
-
-        history.forEach((h: any) => (h.active = false));
-        history.unshift(newHistoryItem);
-        fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf-8');
-
-        // Recalibrate master.json scene durations
+        // Recalibrate master.json scene durations to match exact audio narration length + 0.8s buffer padding (capped at 29.5s max)
         const masterPath = this.storageService.getFilePath(runDir, 'master.json');
         if (fs.existsSync(masterPath)) {
           try {
@@ -296,18 +211,21 @@ export class PipelineOrchestrator {
                 masterData.scenes[lastIdx].durationSeconds = (masterData.scenes[lastIdx].durationSeconds || 5) + extraSec;
                 masterData.totalDuration = targetVideoDur;
                 this.storageService.saveJson(runDir, 'master.json', masterData);
+                this.logger.info(`Recalibrated final scene duration (+${extraSec}s padding) to match voice narration (${targetVideoDur}s total)`);
               }
             }
-          } catch (e) {}
+          } catch (e) { }
         }
 
         if (this.wizardState) {
           this.wizardState.currentStep = 3;
-          this.wizardState.voicePath = targetVoiceFile;
+          this.wizardState.voicePath = voiceMp3Path;
           this.wizardState.voiceDuration = duration;
         }
 
-        return { audioUrl: newHistoryItem.audioUrl, duration, history };
+        const audioUrl = `/api/runs/${runId}/file/voice.mp3?t=${Date.now()}`;
+        const takeUrl = `/api/runs/${runId}/file/takes/${takeFileName}?t=${Date.now()}`;
+        return { audioUrl, takeUrl, duration, provider: actualProvider, takeNumber: takeNum };
       } finally {
         this.activeVoiceGenerations.delete(runId);
       }
@@ -316,48 +234,85 @@ export class PipelineOrchestrator {
     return taskPromise;
   }
 
-  public async wizardStep3_GetVoiceHistory(runId: string): Promise<{ history: any[] }> {
+  // ========================================================================
+  //  WIZARD STEP 3b: Upload / Copy custom browsed voice audio file
+  // ========================================================================
+  public async wizardStep3_UploadVoice(
+    runId: string,
+    fileData?: string,
+    filePath?: string,
+    originalName?: string
+  ): Promise<{ success: boolean; audioUrl: string; takeUrl: string; duration: number; takeNumber: number; fileName: string }> {
     const runDir = this.storageService.getRunDir(runId);
-    const historyPath = path.join(runDir, 'voices', 'history.json');
-    if (fs.existsSync(historyPath)) {
-      try {
-        const history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
-        return { history };
-      } catch (e) {}
+    const takesDir = path.join(runDir, 'takes');
+    if (!fs.existsSync(takesDir)) fs.mkdirSync(takesDir, { recursive: true });
+
+    const existingTakes = fs.readdirSync(takesDir).filter(f => f.startsWith('take_') && f.endsWith('.mp3'));
+    const takeNum = existingTakes.length + 1;
+    const takeFileName = `take_${String(takeNum).padStart(2, '0')}.mp3`;
+    const targetPath = path.join(takesDir, takeFileName);
+    const mainVoicePath = this.storageService.getFilePath(runDir, 'voice.mp3');
+
+    if (filePath && fs.existsSync(filePath)) {
+      this.logger.info(`📁 Copying browsed voice audio file from "${filePath}" -> "${targetPath}"`);
+      fs.copyFileSync(filePath, targetPath);
+      fs.copyFileSync(filePath, mainVoicePath);
+    } else if (fileData) {
+      this.logger.info(`📁 Saving uploaded voice audio file (${originalName || 'custom_voice.mp3'})...`);
+      const cleanBase64 = fileData.replace(/^data:audio\/\w+;base64,/, '').replace(/^data:application\/octet-stream;base64,/, '');
+      const buffer = Buffer.from(cleanBase64, 'base64');
+      fs.writeFileSync(targetPath, buffer);
+      fs.writeFileSync(mainVoicePath, buffer);
+    } else {
+      throw new Error('No valid audio file data or source file path provided');
     }
-    return { history: [] };
+
+    const duration = (await this.voiceService.getExactAudioDuration(targetPath)) || 20;
+
+    // Recalibrate master.json scene durations
+    const masterPath = this.storageService.getFilePath(runDir, 'master.json');
+    if (fs.existsSync(masterPath)) {
+      try {
+        const masterData = JSON.parse(fs.readFileSync(masterPath, 'utf-8'));
+        if (masterData && Array.isArray(masterData.scenes) && masterData.scenes.length > 0) {
+          const plannedSum = masterData.scenes.reduce((acc: number, s: any) => acc + (s.durationSeconds || 5), 0);
+          const targetVideoDur = Math.min(29.5, Math.ceil(duration + 0.8));
+          if (plannedSum < targetVideoDur) {
+            const extraSec = targetVideoDur - plannedSum;
+            const lastIdx = masterData.scenes.length - 1;
+            masterData.scenes[lastIdx].durationSeconds = (masterData.scenes[lastIdx].durationSeconds || 5) + extraSec;
+            masterData.totalDuration = targetVideoDur;
+            this.storageService.saveJson(runDir, 'master.json', masterData);
+          }
+        }
+      } catch (e) { }
+    }
+
+    const audioUrl = `/api/runs/${runId}/file/voice.mp3?t=${Date.now()}`;
+    const takeUrl = `/api/runs/${runId}/file/takes/${takeFileName}?t=${Date.now()}`;
+    return { success: true, audioUrl, takeUrl, duration, takeNumber: takeNum, fileName: originalName || takeFileName };
   }
 
-  public async wizardStep3_SelectVoiceTake(runId: string, takeId: number): Promise<{ success: boolean; activeAudioUrl: string; activeItem: any; history: any[] }> {
+  // ========================================================================
+  //  WIZARD STEP 3c: Select active take for video narration
+  // ========================================================================
+  public async wizardStep3_SelectTake(
+    runId: string,
+    takeFileName: string
+  ): Promise<{ success: boolean; audioUrl: string; duration: number }> {
     const runDir = this.storageService.getRunDir(runId);
-    const voicesDir = path.join(runDir, 'voices');
-    const targetFile = path.join(voicesDir, `${takeId}.mp3`);
-    const rootVoiceFile = this.storageService.getFilePath(runDir, 'voice.mp3');
+    const takePath = path.join(runDir, 'takes', takeFileName);
+    const mainVoicePath = this.storageService.getFilePath(runDir, 'voice.mp3');
 
-    if (!fs.existsSync(targetFile)) throw new Error(`Voice take ${takeId}.mp3 not found`);
-    fs.copyFileSync(targetFile, rootVoiceFile);
-
-    const historyPath = path.join(voicesDir, 'history.json');
-    let history: any[] = [];
-    if (fs.existsSync(historyPath)) {
-      try {
-        history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
-      } catch (e) {}
+    if (!fs.existsSync(takePath)) {
+      throw new Error(`Take file ${takeFileName} does not exist in run directory`);
     }
 
-    history.forEach((h: any) => {
-      h.active = (h.id === takeId);
-    });
+    fs.copyFileSync(takePath, mainVoicePath);
+    const duration = (await this.voiceService.getExactAudioDuration(mainVoicePath)) || 20;
 
-    fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf-8');
-    const activeItem = history.find((h: any) => h.id === takeId);
-
-    return {
-      success: true,
-      activeAudioUrl: `/api/runs/${runId}/file/voices/${takeId}.mp3?t=${Date.now()}`,
-      activeItem,
-      history
-    };
+    const audioUrl = `/api/runs/${runId}/file/voice.mp3?t=${Date.now()}`;
+    return { success: true, audioUrl, duration };
   }
 
   // ========================================================================
@@ -750,5 +705,159 @@ export class PipelineOrchestrator {
       this.logger.error(`Scene ${sceneNumber} Retry Failed: ${res.errorMessage}`);
       return false;
     }
+  }
+
+  public getCustomVoices(): { value: string; label: string; gender?: string }[] {
+    const samplesBase = path.resolve(process.cwd(), 'scripts/models/ChatterboxTrainingAudioSamples');
+    if (!fs.existsSync(samplesBase)) return [];
+
+    const dirs = fs.readdirSync(samplesBase);
+    const voices: { value: string; label: string; gender?: string }[] = [];
+
+    for (const dirName of dirs) {
+      if (['default', 'custom1', '1', '2'].includes(dirName)) continue;
+      const fullDir = path.join(samplesBase, dirName);
+      try {
+        if (fs.statSync(fullDir).isDirectory()) {
+          const metaPath = path.join(fullDir, 'metadata.json');
+          let label = dirName;
+          let gender = 'Male';
+
+          if (fs.existsSync(metaPath)) {
+            try {
+              const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+              if (meta.label) label = meta.label;
+              else if (meta.name) label = `${meta.gender || 'Male'} - ${meta.name} (#${meta.speakerId || ''})`.trim();
+              if (meta.gender) gender = meta.gender;
+            } catch (e) {}
+          } else if (dirName.startsWith('libri_')) {
+            const id = dirName.replace('libri_', '');
+            label = `LibriSpeech Speaker #${id}`;
+          } else if (dirName.startsWith('vox_')) {
+            const parts = dirName.replace('vox_', '').split('_');
+            const gen = parts.pop() || 'male';
+            gender = gen.toLowerCase() === 'female' ? 'Female' : 'Male';
+            const name = parts.join(' ').replace(/_/g, ' ');
+            label = `🌟 ${name} (${gender} Celebrity)`;
+          }
+
+          const icon = gender.toLowerCase() === 'female' ? '👩' : '🎙️';
+          voices.push({
+            value: dirName,
+            label: `${icon} ${label}`,
+            gender,
+          });
+        }
+      } catch (e) {}
+    }
+
+    voices.sort((a, b) => a.label.localeCompare(b.label));
+
+    // Pin vox_Alex_Kingston_female to the very top of the list if present
+    const topPresetIndex = voices.findIndex((v) => v.value === 'vox_Alex_Kingston_female');
+    if (topPresetIndex > -1) {
+      const [topPreset] = voices.splice(topPresetIndex, 1);
+      topPreset.label = `⭐ 👩 Alex Kingston (Female Celebrity - Featured)`;
+      voices.unshift(topPreset);
+    }
+
+    return voices;
+  }
+
+  public getVox2Voices(): { value: string; label: string; gender?: string }[] {
+    const jsonIndex = path.resolve(process.cwd(), 'scripts/models/vox2_master_index.json');
+    if (fs.existsSync(jsonIndex)) {
+      try {
+        const raw = fs.readFileSync(jsonIndex, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      } catch (e) {}
+    }
+
+    const samplesBase = path.resolve(process.cwd(), 'scripts/models/ChatterboxVox2Samples');
+    if (!fs.existsSync(samplesBase)) return [];
+
+    try {
+      const dirs = fs.readdirSync(samplesBase);
+      const voices: { value: string; label: string; gender?: string }[] = [];
+
+      for (const dirName of dirs) {
+        const fullDir = path.join(samplesBase, dirName);
+        if (fs.statSync(fullDir).isDirectory()) {
+          const parts = dirName.replace('vox_', '').split('_');
+          const gen = parts.pop() || 'male';
+          const gender = gen.toLowerCase() === 'female' ? 'Female' : 'Male';
+          const name = parts.join(' ').replace(/_/g, ' ');
+          const icon = gender.toLowerCase() === 'female' ? '👩' : '🎙️';
+          voices.push({
+            value: dirName,
+            label: `${icon} 🌟 ${name} (${gender} Celebrity - Vox2)`,
+            gender,
+          });
+        }
+      }
+      return voices.sort((a, b) => a.label.localeCompare(b.label));
+    } catch (e) {
+      return [];
+    }
+  }
+
+  public getStarredVoices(): string[] {
+    const file = path.resolve(process.cwd(), 'scripts/models/starred_voices.json');
+    if (fs.existsSync(file)) {
+      try {
+        const raw = fs.readFileSync(file, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {}
+    }
+    return ['vox_Alex_Kingston_female'];
+  }
+
+  public saveStarredVoices(starredVoices: string[]): { success: boolean } {
+    try {
+      const file = path.resolve(process.cwd(), 'scripts/models/starred_voices.json');
+      const dir = path.dirname(file);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(file, JSON.stringify(starredVoices, null, 2), 'utf-8');
+      return { success: true };
+    } catch (e) {
+      return { success: false };
+    }
+  }
+
+  public async addCustomVoice(fileData: string, fileName: string): Promise<{ success: boolean; voiceId: string; label: string }> {
+    const samplesBase = path.resolve(process.cwd(), 'scripts/models/ChatterboxTrainingAudioSamples');
+    if (!fs.existsSync(samplesBase)) fs.mkdirSync(samplesBase, { recursive: true });
+
+    const timeId = Date.now();
+    const folderName = `custom_${timeId}`;
+    const targetDir = path.join(samplesBase, folderName);
+    fs.mkdirSync(targetDir, { recursive: true });
+
+    const base64Data = fileData.replace(/^data:audio\/\w+;base64,/, '');
+    const buffer = Buffer.from(base64Data, 'base64');
+    const ext = path.extname(fileName) || '.mp3';
+    const sampleFile = path.join(targetDir, `sample${ext}`);
+    fs.writeFileSync(sampleFile, buffer);
+
+    const cleanName = path.basename(fileName, ext).replace(/_/g, ' ');
+    const label = `Custom Voice - ${cleanName}`;
+
+    const metadata = {
+      speakerId: `custom_${timeId}`,
+      name: cleanName,
+      gender: 'Male',
+      label: `🎙️ ${label}`,
+    };
+    fs.writeFileSync(path.join(targetDir, 'metadata.json'), JSON.stringify(metadata, null, 2), 'utf-8');
+
+    return {
+      success: true,
+      voiceId: folderName,
+      label: `🎙️ ${label}`,
+    };
   }
 }

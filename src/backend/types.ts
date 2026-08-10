@@ -21,6 +21,7 @@ export interface NewsArticle {
   datetime: number;
   category: string;
   fullText?: string;
+  rawData?: any;
 }
 
 export interface GeminiAnalysis {
@@ -44,6 +45,7 @@ export interface ScriptOutput {
 export interface SceneItem {
   sceneNumber: number;
   durationSeconds: number;
+  startSec?: number;
   narrationText: string;
   subtitleText: string;
   videoPrompt: string;
@@ -129,6 +131,10 @@ export interface WizardState {
 
 export interface AppSettings {
   finnhubApiKey: string;
+  marketauxApiKey?: string;
+  alphavantageApiKey?: string;
+  benzingaApiKey?: string;
+  newsSource?: string;
   geminiApiKey: string;
   pexelsApiKey: string;
   whisperApiKey: string;

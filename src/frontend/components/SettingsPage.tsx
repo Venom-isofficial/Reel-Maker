@@ -85,6 +85,36 @@ export const SettingsPage: React.FC = () => {
                 />
               </div>
               <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Marketaux API Key (Finance News)</label>
+                <input
+                  type="password"
+                  value={settings.marketauxApiKey || ''}
+                  onChange={(e) => handleChange('marketauxApiKey', e.target.value)}
+                  placeholder="Marketaux API Token..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Alpha Vantage API Key (Market Sentiment)</label>
+                <input
+                  type="password"
+                  value={settings.alphavantageApiKey || ''}
+                  onChange={(e) => handleChange('alphavantageApiKey', e.target.value)}
+                  placeholder="Alpha Vantage key..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Benzinga API Key (Stock News)</label>
+                <input
+                  type="password"
+                  value={settings.benzingaApiKey || ''}
+                  onChange={(e) => handleChange('benzingaApiKey', e.target.value)}
+                  placeholder="Benzinga token..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+              <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1">Gemini API Key</label>
                 <input
                   type="password"

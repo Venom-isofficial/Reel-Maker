@@ -24,13 +24,15 @@ export class VideoService {
   private async processClipWithFFmpeg(
     rawVideoPath: string,
     outputPath: string,
-    durationSeconds: number
+    durationSeconds: number,
+    startSec: number = 0
   ): Promise<boolean> {
     try {
-      const targetDuration = Math.max(3, durationSeconds || 5);
+      const targetDuration = Math.max(0.5, durationSeconds || 5);
+      const startOffset = Math.max(0, startSec || 0);
       // Try NVIDIA NVENC hardware acceleration first
       try {
-        const nvencCmd = `ffmpeg -y -ss 0 -i "${rawVideoPath.replace(/\\/g, '/')}" -t ${targetDuration} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30" -c:v h264_nvenc -preset p4 -pix_fmt yuv420p -an "${outputPath.replace(/\\/g, '/')}"`;
+        const nvencCmd = `ffmpeg -y -ss ${startOffset} -i "${rawVideoPath.replace(/\\/g, '/')}" -t ${targetDuration} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30" -c:v h264_nvenc -preset p4 -pix_fmt yuv420p -an "${outputPath.replace(/\\/g, '/')}"`;
         await execAsync(nvencCmd, { timeout: 30000 });
         if (fs.existsSync(outputPath) && fs.statSync(outputPath).size > 50000) {
           return true;
@@ -39,7 +41,7 @@ export class VideoService {
         console.warn('NVENC GPU acceleration fallback to libx264:', nvencErr.message);
       }
 
-      const cmd = `ffmpeg -y -ss 0 -i "${rawVideoPath.replace(/\\/g, '/')}" -t ${targetDuration} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -an "${outputPath.replace(/\\/g, '/')}"`;
+      const cmd = `ffmpeg -y -ss ${startOffset} -i "${rawVideoPath.replace(/\\/g, '/')}" -t ${targetDuration} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,fps=30" -c:v libx264 -preset ultrafast -pix_fmt yuv420p -an "${outputPath.replace(/\\/g, '/')}"`;
       await execAsync(cmd, { timeout: 30000 });
       return fs.existsSync(outputPath) && fs.statSync(outputPath).size > 50000;
     } catch (err: any) {

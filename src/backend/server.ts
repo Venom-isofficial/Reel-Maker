@@ -54,7 +54,8 @@ const orchestrator = new PipelineOrchestrator(
 // Step 1: Fetch news → analyze → generate script
 app.post('/api/wizard/step1-script', async (req, res) => {
   try {
-    const result = await orchestrator.wizardStep1_Script();
+    const { newsSource } = req.body || {};
+    const result = await orchestrator.wizardStep1_Script(newsSource);
     res.json({ success: true, ...result });
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
@@ -76,7 +77,7 @@ app.post('/api/wizard/step2-scenes', async (req, res) => {
 // Step 3: Generate voice TTS
 app.post('/api/wizard/step3-voice', async (req, res) => {
   try {
-    const { scriptText, runId, voiceName, provider, elevenLabsApiKey, ttsSpeed, exaggeration, cfgWeight, temperature, repetitionPenalty, topP, stability, similarityBoost, style, useSpeakerBoost, applyTextNormalization } = req.body;
+    const { scriptText, runId, voiceName, provider, elevenLabsApiKey, ttsSpeed, exaggeration, cfgWeight } = req.body;
     if (!scriptText || !runId) return res.status(400).json({ success: false, message: 'scriptText and runId required' });
     const result = await orchestrator.wizardStep3_Voice(
       scriptText,
@@ -86,15 +87,7 @@ app.post('/api/wizard/step3-voice', async (req, res) => {
       elevenLabsApiKey,
       ttsSpeed ? parseFloat(ttsSpeed) : undefined,
       exaggeration ? parseFloat(exaggeration) : undefined,
-      cfgWeight ? parseFloat(cfgWeight) : undefined,
-      temperature ? parseFloat(temperature) : undefined,
-      repetitionPenalty ? parseFloat(repetitionPenalty) : undefined,
-      topP ? parseFloat(topP) : undefined,
-      stability !== undefined ? parseFloat(stability) : undefined,
-      similarityBoost !== undefined ? parseFloat(similarityBoost) : undefined,
-      style !== undefined ? parseFloat(style) : undefined,
-      useSpeakerBoost !== undefined ? Boolean(useSpeakerBoost) : undefined,
-      applyTextNormalization
+      cfgWeight ? parseFloat(cfgWeight) : undefined
     );
     res.json({ success: true, ...result });
   } catch (err: any) {
@@ -102,23 +95,24 @@ app.post('/api/wizard/step3-voice', async (req, res) => {
   }
 });
 
-// Step 3b: Get voice history for runId
-app.get('/api/wizard/step3-voice-history/:runId', async (req, res) => {
+// Step 3b: Upload custom voice file
+app.post('/api/wizard/step3-upload-voice', async (req, res) => {
   try {
-    const { runId } = req.params;
-    const result = await orchestrator.wizardStep3_GetVoiceHistory(runId);
-    res.json({ success: true, ...result });
+    const { runId, fileData, filePath, originalName } = req.body;
+    if (!runId) return res.status(400).json({ success: false, message: 'runId required' });
+    const result = await orchestrator.wizardStep3_UploadVoice(runId, fileData, filePath, originalName);
+    res.json(result);
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
   }
 });
 
-// Step 3c: Select an active voice take from history
-app.post('/api/wizard/step3-select-voice', async (req, res) => {
+// Step 3c: Select active take for video generation
+app.post('/api/wizard/step3-select-take', async (req, res) => {
   try {
-    const { runId, takeId } = req.body;
-    if (!runId || !takeId) return res.status(400).json({ success: false, message: 'runId and takeId required' });
-    const result = await orchestrator.wizardStep3_SelectVoiceTake(runId, parseInt(takeId));
+    const { runId, takeFileName } = req.body;
+    if (!runId || !takeFileName) return res.status(400).json({ success: false, message: 'runId and takeFileName required' });
+    const result = await orchestrator.wizardStep3_SelectTake(runId, takeFileName);
     res.json(result);
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
@@ -210,6 +204,62 @@ app.post('/api/wizard/save-edits', async (req, res) => {
 //  LEGACY & UTILITY ENDPOINTS
 // =======================================================================
 
+// GET Chatterbox Custom / LibriSpeech Voices (VoxCeleb 1)
+app.get('/api/chatterbox/custom-voices', (req, res) => {
+  try {
+    const voices = orchestrator.getCustomVoices();
+    res.json({ success: true, voices });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message, voices: [] });
+  }
+});
+
+// GET Chatterbox Vox2 HD Celebrity Voices (VoxCeleb 2)
+app.get('/api/chatterbox/vox2-voices', (req, res) => {
+  try {
+    const voices = orchestrator.getVox2Voices();
+    res.json({ success: true, voices });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message, voices: [] });
+  }
+});
+
+// GET Starred Voices (Permanent Favorites)
+app.get('/api/chatterbox/starred-voices', (req, res) => {
+  try {
+    const starredVoices = orchestrator.getStarredVoices();
+    res.json({ success: true, starredVoices });
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message, starredVoices: [] });
+  }
+});
+
+// POST Save Starred Voices (Permanent Favorites)
+app.post('/api/chatterbox/starred-voices', (req, res) => {
+  try {
+    const { starredVoices } = req.body || {};
+    if (!Array.isArray(starredVoices)) {
+      return res.status(400).json({ success: false, message: 'starredVoices array required' });
+    }
+    const result = orchestrator.saveStarredVoices(starredVoices);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+// POST Upload custom voice profile
+app.post('/api/chatterbox/add-voice', async (req, res) => {
+  try {
+    const { fileData, fileName } = req.body;
+    if (!fileData || !fileName) return res.status(400).json({ success: false, message: 'fileData and fileName required' });
+    const result = await orchestrator.addCustomVoice(fileData, fileName);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 // Current pipeline/wizard state
 app.get('/api/pipeline/state', (req, res) => {
   const state = orchestrator.getCurrentState();
@@ -286,6 +336,9 @@ app.get('/api/settings', (req, res) => {
 app.post('/api/settings', (req, res) => {
   const updated = settingsService.saveSettings(req.body);
   newsService.setApiKey(updated.finnhubApiKey);
+  if (updated.marketauxApiKey) newsService.setMarketauxApiKey(updated.marketauxApiKey);
+  if (updated.alphavantageApiKey) newsService.setAlphavantageApiKey(updated.alphavantageApiKey);
+  if (updated.benzingaApiKey) newsService.setBenzingaApiKey(updated.benzingaApiKey);
   aiService.setApiKey(updated.geminiApiKey);
   voiceService.setApiKey(updated.geminiApiKey);
   subtitleService.setApiKey(updated.whisperApiKey);
