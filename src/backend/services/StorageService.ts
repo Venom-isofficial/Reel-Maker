@@ -65,18 +65,94 @@ export class StorageService {
     return fs.existsSync(path.join(runDir, relativePath));
   }
 
-  public listRuns(): Array<{ runId: string; created: Date; hasRender: boolean }> {
+  public listRuns(): Array<{
+    runId: string;
+    created: Date;
+    formattedDate: string;
+    title: string;
+    scriptSnippet: string;
+    step: number;
+    stepLabel: string;
+    hasVoice: boolean;
+    hasClips: boolean;
+    hasRender: boolean;
+    finalVideoUrl: string | null;
+  }> {
     if (!fs.existsSync(this.baseDir)) return [];
     const dirs = fs.readdirSync(this.baseDir).filter((d) => d.startsWith('run_'));
     
     return dirs.sort().reverse().map((runId) => {
       const runDir = path.join(this.baseDir, runId);
       const stats = fs.statSync(runDir);
+      
+      const articlePath = path.join(runDir, 'article.json');
+      const scriptPath = path.join(runDir, 'script.json');
+      const masterPath = path.join(runDir, 'master.json');
+      const voicePath = path.join(runDir, 'voice.mp3');
+      const clipsDir = path.join(runDir, 'clips');
       const renderPath = path.join(runDir, 'render', 'final.mp4');
+
+      let title = `Run ${runId}`;
+      let scriptSnippet = '';
+      if (fs.existsSync(articlePath)) {
+        try {
+          const art = JSON.parse(fs.readFileSync(articlePath, 'utf-8'));
+          if (art && art.headline) title = art.headline;
+        } catch (e) {}
+      }
+      if (fs.existsSync(scriptPath)) {
+        try {
+          const scr = JSON.parse(fs.readFileSync(scriptPath, 'utf-8'));
+          if (scr && scr.fullScript) {
+            scriptSnippet = scr.fullScript.slice(0, 120) + (scr.fullScript.length > 120 ? '...' : '');
+            if (title === `Run ${runId}` && scr.hook) title = scr.hook;
+          }
+        } catch (e) {}
+      }
+
+      const hasVoice = fs.existsSync(voicePath);
+      const hasClips = fs.existsSync(clipsDir) && fs.readdirSync(clipsDir).filter(f => f.endsWith('.mp4')).length > 0;
+      const hasRender = fs.existsSync(renderPath);
+
+      let step = 1;
+      let stepLabel = 'Step 1 (Script Saved)';
+      if (hasRender) {
+        step = 6;
+        stepLabel = 'Step 6 (Render Complete)';
+      } else if (hasClips) {
+        step = 5;
+        stepLabel = 'Step 5 (Clips Ready)';
+      } else if (hasVoice) {
+        step = 4;
+        stepLabel = 'Step 4 (Voice Ready)';
+      } else if (fs.existsSync(masterPath)) {
+        step = 3;
+        stepLabel = 'Step 3 (Scenes Ready)';
+      } else if (fs.existsSync(scriptPath)) {
+        step = 2;
+        stepLabel = 'Step 2 (Script Ready)';
+      }
+
+      const finalVideoUrl = hasRender ? `/api/runs/${runId}/file/render/final.mp4` : null;
+      const formattedDate = new Date(stats.birthtime).toLocaleString([], {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
       return {
         runId,
         created: stats.birthtime,
-        hasRender: fs.existsSync(renderPath),
+        formattedDate,
+        title,
+        scriptSnippet,
+        step,
+        stepLabel,
+        hasVoice,
+        hasClips,
+        hasRender,
+        finalVideoUrl
       };
     });
   }

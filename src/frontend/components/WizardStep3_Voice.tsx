@@ -13,6 +13,7 @@ export interface VoiceTake {
   id: string;
   takeNumber: number;
   audioUrl: string;
+  takeUrl?: string;
   takeFileName?: string;
   duration: number;
   provider: string;
@@ -129,7 +130,21 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
         }
       })
       .catch(() => { });
-  }, []);
+
+    if (runId) {
+      fetch(`/api/wizard/step3-takes?runId=${runId}`)
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.takes && Array.isArray(data.takes) && data.takes.length > 0) {
+            setTakes(data.takes);
+            setActiveTakeId(data.takes[0].id);
+            setAudioUrl(data.takes[0].takeUrl || data.takes[0].audioUrl);
+            setDuration(data.takes[0].duration);
+          }
+        })
+        .catch(() => { });
+    }
+  }, [runId]);
 
   const saveApiKeyToSettings = async () => {
     if (!elevenLabsApiKey.trim()) return;
@@ -194,6 +209,7 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
             id: `take_${newTakeNumber}_${Date.now()}`,
             takeNumber: newTakeNumber,
             audioUrl: data.audioUrl,
+            takeUrl: data.takeUrl || data.audioUrl,
             takeFileName: `take_${String(newTakeNumber).padStart(2, '0')}.mp3`,
             duration: data.duration,
             provider: 'Uploaded File',
@@ -206,7 +222,7 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
 
           setTakes((prev) => [newTake, ...prev]);
           setActiveTakeId(newTake.id);
-          setAudioUrl(data.audioUrl);
+          setAudioUrl(data.takeUrl || data.audioUrl);
           setDuration(data.duration);
         } catch (err: any) {
           setError(err.message);
@@ -266,10 +282,12 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
             : 'Kokoro Local';
 
       const newTakeNumber = data.takeNumber || (takes.length + 1);
+      const targetTakeUrl = data.takeUrl || data.audioUrl;
       const newTake: VoiceTake = {
         id: `take_${newTakeNumber}_${Date.now()}`,
         takeNumber: newTakeNumber,
         audioUrl: data.audioUrl,
+        takeUrl: targetTakeUrl,
         takeFileName: `take_${String(newTakeNumber).padStart(2, '0')}.mp3`,
         duration: data.duration,
         provider: actualProviderLabel,
@@ -284,7 +302,7 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
 
       setTakes((prev) => [newTake, ...prev]);
       setActiveTakeId(newTake.id);
-      setAudioUrl(data.audioUrl);
+      setAudioUrl(targetTakeUrl);
       setDuration(data.duration);
     } catch (err: any) {
       const msg = err.message === 'Failed to fetch'
@@ -1028,8 +1046,8 @@ export const WizardStep3_Voice: React.FC<Props> = ({ script, runId, onComplete, 
 
                   {/* Inline Audio Player for this Take */}
                   <div className="bg-slate-950 rounded-xl p-2.5 border border-slate-900">
-                    <audio controls className="w-full h-8" key={take.audioUrl}>
-                      <source src={take.audioUrl} type="audio/mpeg" />
+                    <audio controls className="w-full h-8" key={take.takeUrl || take.audioUrl}>
+                      <source src={take.takeUrl || take.audioUrl} type="audio/mpeg" />
                     </audio>
                   </div>
                 </div>

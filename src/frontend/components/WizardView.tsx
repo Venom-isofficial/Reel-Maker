@@ -113,6 +113,16 @@ export const WizardView: React.FC = () => {
           initialArticle={article}
           initialAnalysis={analysis}
           initialRunId={runId}
+          onResumeRun={(data) => {
+            setRunId(data.runId);
+            setArticle(data.article);
+            setAnalysis(data.analysis);
+            setScript(data.script);
+            setMasterPlan(data.masterPlan);
+            setClips(data.clips || []);
+            setFinalVideoUrl(data.finalVideoUrl);
+            setCurrentStep(data.step || 2);
+          }}
           onComplete={(data) => {
             // If the script text or runId changed, invalidate downstream scene plan
             if (!script || script.fullScript !== data.script.fullScript || runId !== data.runId) {

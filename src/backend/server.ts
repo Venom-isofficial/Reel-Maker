@@ -62,6 +62,20 @@ app.post('/api/wizard/step1-script', async (req, res) => {
   }
 });
 
+// Step 1b: Custom script input (manual topic & script text)
+app.post('/api/wizard/step1-custom-script', async (req, res) => {
+  try {
+    const { customTitle, customText } = req.body || {};
+    if (!customText || !customText.trim()) {
+      return res.status(400).json({ success: false, message: 'customText is required' });
+    }
+    const result = await orchestrator.wizardStep1_CustomScript(customTitle, customText);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, message: err.message });
+  }
+});
+
 // Step 2: Generate scene plan from approved script
 app.post('/api/wizard/step2-scenes', async (req, res) => {
   try {
@@ -116,6 +130,18 @@ app.post('/api/wizard/step3-select-take', async (req, res) => {
     res.json(result);
   } catch (err: any) {
     res.status(400).json({ success: false, message: err.message });
+  }
+});
+
+// Step 3d: Get all saved takes for a run
+app.get('/api/wizard/step3-takes', async (req, res) => {
+  try {
+    const runId = req.query.runId as string;
+    if (!runId) return res.status(400).json({ success: false, message: 'runId required' });
+    const result = await orchestrator.wizardStep3_GetTakes(runId);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 
@@ -287,6 +313,14 @@ app.get('/api/pipeline/logs/stream', (req, res) => {
 app.get('/api/runs', (req, res) => {
   const runs = storageService.listRuns();
   res.json({ runs });
+});
+
+// Run full details (for resuming past runs)
+app.get('/api/runs/:runId/data', (req, res) => {
+  const { runId } = req.params;
+  const data = orchestrator.getRunDetails(runId);
+  if (!data) return res.status(404).json({ success: false, message: 'Run not found' });
+  res.json({ success: true, data });
 });
 
 // Run files

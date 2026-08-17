@@ -131,6 +131,117 @@ export class PipelineOrchestrator {
   }
 
   // ========================================================================
+  //  WIZARD STEP 1b: Custom Script Input Mode (User Enters Title & Script Text)
+  // ========================================================================
+  public async wizardStep1_CustomScript(
+    customTitle: string,
+    customText: string
+  ): Promise<{ article: NewsArticle; analysis: GeminiAnalysis; script: ScriptOutput; runId: string; runDir: string }> {
+    const { runId, runDir } = this.storageService.createNextRun();
+    this.logger.setRunDir(runDir);
+
+    const cleanTitle = (customTitle || '').trim() || 'Custom Financial Narration';
+    const cleanText = (customText || '').trim();
+
+    const article: NewsArticle = {
+      id: `custom_${Date.now()}`,
+      headline: cleanTitle,
+      summary: cleanText,
+      url: 'custom://input',
+      source: 'Custom Script Input',
+      datetime: Date.now(),
+      category: 'Custom',
+      fullText: cleanText,
+    };
+
+    const analysis: GeminiAnalysis = {
+      summary: cleanText,
+      keywords: ['Custom', 'Input'],
+      entities: ['User'],
+      importance: 5,
+      topic: cleanTitle,
+      sentiment: 'Neutral',
+    };
+
+    const script: ScriptOutput = {
+      hook: cleanTitle,
+      introduction: cleanTitle,
+      body: cleanText,
+      ending: 'Follow for more updates!',
+      cta: 'Follow for more updates!',
+      fullScript: cleanText,
+    };
+
+    this.storageService.saveJson(runDir, 'article.json', article);
+    this.storageService.saveJson(runDir, 'analysis.json', analysis);
+    this.storageService.saveJson(runDir, 'script.json', script);
+
+    this.wizardState = {
+      runId,
+      runDir,
+      currentStep: 1,
+      article,
+      analysis,
+      script,
+    };
+
+    return { article, analysis, script, runId, runDir };
+  }
+
+  // ========================================================================
+  //  GET RUN DETAILS (Resume / Revisit Past Runs)
+  // ========================================================================
+  public getRunDetails(runId: string): any {
+    const runDir = this.storageService.getRunDir(runId);
+    if (!fs.existsSync(runDir)) return null;
+
+    const article = this.storageService.readJson<NewsArticle>(runDir, 'article.json');
+    const analysis = this.storageService.readJson<GeminiAnalysis>(runDir, 'analysis.json');
+    const script = this.storageService.readJson<ScriptOutput>(runDir, 'script.json');
+    const masterPlan = this.storageService.readJson<MasterPlan>(runDir, 'master.json');
+    const takes = this.storageService.readJson<any[]>(runDir, 'takes/takes_meta.json') || [];
+
+    const renderPath = path.join(runDir, 'render', 'final.mp4');
+    const hasRender = fs.existsSync(renderPath);
+    const finalVideoUrl = hasRender ? `/api/runs/${runId}/file/render/final.mp4` : null;
+
+    const clipsDir = path.join(runDir, 'clips');
+    const hasClips = fs.existsSync(clipsDir) && fs.readdirSync(clipsDir).filter(f => f.endsWith('.mp4')).length > 0;
+    const voicePath = path.join(runDir, 'voice.mp3');
+    const hasVoice = fs.existsSync(voicePath);
+
+    let step = 1;
+    if (hasRender) step = 6;
+    else if (hasClips) step = 5;
+    else if (hasVoice) step = 4;
+    else if (masterPlan) step = 3;
+    else if (script) step = 2;
+
+    let clips: any[] = [];
+    if (hasClips && masterPlan && Array.isArray(masterPlan.scenes)) {
+      clips = masterPlan.scenes.map(s => ({
+        sceneNumber: s.sceneNumber,
+        clipUrl: `/api/runs/${runId}/file/clips/scene_${String(s.sceneNumber).padStart(2, '0')}.mp4`,
+        searchKeyword: s.searchKeyword || s.videoPrompt || s.narrationText,
+        status: 'completed'
+      }));
+    }
+
+    return {
+      runId,
+      article,
+      analysis,
+      script,
+      masterPlan,
+      takes,
+      clips,
+      hasRender,
+      finalVideoUrl,
+      step,
+    };
+  }
+
+  // ========================================================================
   //  WIZARD STEP 2: Generate Scene Plan from (potentially edited) script
   // ========================================================================
   public async wizardStep2_Scenes(
@@ -225,6 +336,38 @@ export class PipelineOrchestrator {
 
         const audioUrl = `/api/runs/${runId}/file/voice.mp3?t=${Date.now()}`;
         const takeUrl = `/api/runs/${runId}/file/takes/${takeFileName}?t=${Date.now()}`;
+
+        // Save take metadata to takes_meta.json
+        const takeMetaObj = {
+          id: `take_${takeNum}_${Date.now()}`,
+          takeNumber: takeNum,
+          audioUrl: takeUrl,
+          takeUrl: takeUrl,
+          takeFileName: takeFileName,
+          duration: duration,
+          provider: actualProvider,
+          voiceName: voiceName,
+          params: {
+            speed: ttsSpeed || 1.15,
+            exaggeration: exaggeration,
+            cfgWeight: cfgWeight
+          },
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isUploaded: false
+        };
+
+        const takesMetaPath = path.join(takesDir, 'takes_meta.json');
+        let takesList: any[] = [];
+        if (fs.existsSync(takesMetaPath)) {
+          try {
+            const raw = fs.readFileSync(takesMetaPath, 'utf-8');
+            takesList = JSON.parse(raw);
+            if (!Array.isArray(takesList)) takesList = [];
+          } catch (e) {}
+        }
+        takesList.unshift(takeMetaObj);
+        fs.writeFileSync(takesMetaPath, JSON.stringify(takesList, null, 2), 'utf-8');
+
         return { audioUrl, takeUrl, duration, provider: actualProvider, takeNumber: takeNum };
       } finally {
         this.activeVoiceGenerations.delete(runId);
@@ -232,6 +375,21 @@ export class PipelineOrchestrator {
     })();
 
     return taskPromise;
+  }
+
+  public async wizardStep3_GetTakes(runId: string): Promise<{ success: boolean; takes: any[] }> {
+    const runDir = this.storageService.getRunDir(runId);
+    const takesMetaPath = path.join(runDir, 'takes', 'takes_meta.json');
+    if (fs.existsSync(takesMetaPath)) {
+      try {
+        const raw = fs.readFileSync(takesMetaPath, 'utf-8');
+        const takes = JSON.parse(raw);
+        if (Array.isArray(takes)) {
+          return { success: true, takes };
+        }
+      } catch (e) {}
+    }
+    return { success: true, takes: [] };
   }
 
   // ========================================================================
@@ -290,6 +448,35 @@ export class PipelineOrchestrator {
 
     const audioUrl = `/api/runs/${runId}/file/voice.mp3?t=${Date.now()}`;
     const takeUrl = `/api/runs/${runId}/file/takes/${takeFileName}?t=${Date.now()}`;
+
+    // Save uploaded take metadata to takes_meta.json
+    const takeMetaObj = {
+      id: `take_${takeNum}_${Date.now()}`,
+      takeNumber: takeNum,
+      audioUrl: takeUrl,
+      takeUrl: takeUrl,
+      takeFileName: takeFileName,
+      duration: duration,
+      provider: 'Uploaded File',
+      voiceName: originalName || takeFileName,
+      params: { speed: 1.0 },
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isUploaded: true,
+      fileName: originalName || takeFileName
+    };
+
+    const takesMetaPath = path.join(takesDir, 'takes_meta.json');
+    let takesList: any[] = [];
+    if (fs.existsSync(takesMetaPath)) {
+      try {
+        const raw = fs.readFileSync(takesMetaPath, 'utf-8');
+        takesList = JSON.parse(raw);
+        if (!Array.isArray(takesList)) takesList = [];
+      } catch (e) {}
+    }
+    takesList.unshift(takeMetaObj);
+    fs.writeFileSync(takesMetaPath, JSON.stringify(takesList, null, 2), 'utf-8');
+
     return { success: true, audioUrl, takeUrl, duration, takeNumber: takeNum, fileName: originalName || takeFileName };
   }
 
